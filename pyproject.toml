@@ -1,0 +1,26 @@
+[tool.poetry]
+name = "hello"
+version = "0.1.0"
+description = ""
+authors = ["umbrella"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+numpy = "^1.26.3"
+pyjson5 = "^1.6.5"
+jmespath = "^1.0.1"
+pyyaml = "^6.0.1"
+pandas = "^2.2.0"
+xlsxwriter = "^3.1.9"
+openpyxl = "^3.1.2"
+tools = "^0.1.9"
+matplotlib = "^3.8.2"
+scikit-learn = "^1.4.0"
+seaborn = "^0.13.2"
+xgboost = "^2.0.3"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
