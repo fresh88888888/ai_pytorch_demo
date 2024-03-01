@@ -277,6 +277,13 @@ with open('names.yaml', 'r') as file:
 #     csv_writer.writerow(["Jane Doe", 28, "Canada"])
 
 
-print(f"""{f'''{f'{f"{1+1}"}'}'''}""")
-url = 'sdsdsd'
-raise ValueError("bad value for url: %s" % url)
+# print(f"""{f'''{f'{f"{1+1}"}'}'''}""")
+# url = 'sdsdsd'
+# raise ValueError("bad value for url: %s" % url)
+
+planets = ['Mercury', 'Venus', 'Earth', 'Mars','Jupiter', 'Saturn', 'Uranus', 'Neptune']
+
+# str.upper() returns an all-caps version of a string
+loud_short_plants = [planet.upper() + '!' for planet in planets if len(planet) < 6]
+t = 1, 2, 3
+print(t)
