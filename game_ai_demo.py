@@ -24,15 +24,21 @@ env = make('connectx', debug=True)
 # env.render()
 
 # Selects random valid column
+
+
 def agent_random(obs, config):
     valid_moves = [col for col in range(config.columns) if obs.board[col] == 0]
     return random.choice(valid_moves)
 
 # Selects middle column
+
+
 def agent_middle(obs, config):
     return config.columns//2
 
 # Selects leftmost valid column
+
+
 def agent_leftmost(obs, config):
     valid_moves = [col for col in range(config.columns) if obs.board[col] == 0]
     return valid_moves[0]
@@ -98,10 +104,14 @@ def get_heuristic(grid, mark, config):
     return score
 
 # Helper function for get_heuristic: checks if window satisfies heuristic conditions
+
+
 def check_window(window, num_discs, piece, config):
     return (window.count(piece) == num_discs and window.count(0) == config.inarow-num_discs)
 
 # Helper function for get_heuristic: counts number of windows satisfying specified heuristic conditions
+
+
 def count_windows(grid, num_discs, piece, config):
     num_windows = 0
     # horizontal
@@ -150,16 +160,22 @@ def count_windows(grid, num_discs, piece, config):
 # get_win_percentages(agent1=agent, agent2="random")
 
 # Uses minimax to calculate value of dropping piece in selected column
+
+
 def score_move(grid, col, mark, config, nsteps):
     next_grid = drop_piece(grid, col, mark, config)
     score = minimax(next_grid, nsteps-1, False, mark, config)
     return score
 
 # Helper function for minimax: checks if agent or opponent has four in a row in the window
+
+
 def is_terminal_window(window, config):
     return window.count(1) == config.inarow or window.count(2) == config.inarow
 
 # Helper function for minimax: checks if game has ended
+
+
 def is_terminal_node(grid, config):
     # Check for draw
     if list(grid[0, :]).count(0) == 0:
@@ -194,6 +210,8 @@ def is_terminal_node(grid, config):
     return False
 
 # Minimax implementation
+
+
 def minimax(node, depth, maximizingPlayer, mark, config):
     is_terminal = is_terminal_node(node, config)
     valid_moves = [c for c in range(config.columns) if node[0][c] == 0]
@@ -216,6 +234,7 @@ def minimax(node, depth, maximizingPlayer, mark, config):
 # How deep to make the game tree: higher values take longer to run!
 N_STEPS = 3
 
+
 def agent(obs, config):
     # Get list of valid moves
     valid_moves = [c for c in range(config.columns) if obs.board[c] == 0]
@@ -231,6 +250,7 @@ def agent(obs, config):
     return random.choice(max_cols)
 
 # get_win_percentages(agent1=agent, agent2="random", n_rounds=50)
+
 
 class ConnectFourGym(gym.Env):
     def __init__(self, agent2="random"):
@@ -268,13 +288,15 @@ class ConnectFourGym(gym.Env):
             reward = self.change_reward(old_reward, done)
         else:  # End the game and penalize agent
             reward, done, _ = -10, True, {}
-        return np.array(self.obs['board']).reshape(self.rows,self.columns), reward, done, _
+        return np.array(self.obs['board']).reshape(self.rows, self.columns), reward, done, _
 
 
 # Create ConnectFour environment
 env = ConnectFourGym(agent2="random")
 
 # Neural network for predicting action values
+
+
 class CustomCNN(BaseFeaturesExtractor):
 
     def __init__(self, observation_space: gym.spaces.Box, features_dim: int = 128):
@@ -302,6 +324,7 @@ class CustomCNN(BaseFeaturesExtractor):
     def forward(self, observations: th.Tensor) -> th.Tensor:
         return self.linear(self.cnn(observations))
 
+
 policy_kwargs = dict(
     features_extractor_class=CustomCNN,
 )
@@ -310,6 +333,7 @@ policy_kwargs = dict(
 model = PPO("CnnPolicy", env, policy_kwargs=policy_kwargs, verbose=0)
 # Train agent
 model.learn(total_timesteps=60000)
+
 
 def agent1(obs, config):
     # Use the best model to select a column
@@ -321,5 +345,6 @@ def agent1(obs, config):
         return int(col)
     else:
         return random.choice([col for col in range(config.columns) if obs.board[int(col)] == 0])
+
 
 get_win_percentages(agent1=agent1, agent2="random")
