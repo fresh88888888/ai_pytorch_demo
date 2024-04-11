@@ -149,8 +149,8 @@ for fold, (idxT, idxV) in enumerate(skf.split(input_ids, train.sentiment.values)
                                          save_weights_only=True, mode='auto', save_freq='epoch')
 
     model.fit([input_ids[idxT,], attention_mask[idxT,], token_type_ids[idxT,]], [start_tokens[idxT,], end_tokens[idxT,]], epochs=3,
-              batch_size=32, verbose=DISPLAY, callbacks=[sv], validation_data=([input_ids[idxV,], attention_mask[idxV,],
-                                                                                token_type_ids[idxV,]], [start_tokens[idxV,], end_tokens[idxV,]]))
+              batch_size=32, verbose=DISPLAY, callbacks=[sv],
+              validation_data=([input_ids[idxV,], attention_mask[idxV,], token_type_ids[idxV,]], [start_tokens[idxV,], end_tokens[idxV,]]))
 
     print('Loading model...')
     model.load_weights('%s-roberta-%i.h5' % (VER, fold))
