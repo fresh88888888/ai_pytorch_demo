@@ -1,4 +1,5 @@
 
+import sys
 from detr.models.matcher import HungarianMatcher
 from detr.models.detr import SetCriterion
 import cv2
@@ -18,9 +19,11 @@ import albumentations as A
 import matplotlib.pyplot as plt
 from albumentations.pytorch.transforms import ToTensorV2
 from glob import glob
+import keras as keras
+
+from keras.applications import DenseNet121
 
 ################# DETR FUCNTIONS FOR LOSS########################
-import sys
 sys.path.extend(['/Users/zcj/py_workspace/hello/detr/'])
 #################################################################
 
