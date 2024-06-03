@@ -28,7 +28,7 @@ plot_params = dict(
 # Load Tunnel Traffic dataset
 tunnel = pd.read_csv('tunnel.csv', parse_dates=['Day'])
 
-# Create a time series in Pandas by setting the index to a date column. We parsed 'Day' as a date type 
+# Create a time series in Pandas by setting the index to a date column. We parsed 'Day' as a date type
 # by using `parse_dates` when loading the date.
 tunnel = tunnel.set_index('Day')
 
@@ -47,8 +47,8 @@ df['Time'] = np.arange(len(tunnel.index))
 print(df.head())
 
 # Training data
-X = df.loc[:, ['Time']] # features
-y = df.loc[:, 'NumVehicles'] # target
+X = df.loc[:, ['Time']]  # features
+y = df.loc[:, 'NumVehicles']  # target
 
 # Train the model
 model = LinearRegression()

@@ -26,7 +26,6 @@ from keras.applications import DenseNet121
 ################# DETR FUCNTIONS FOR LOSS########################
 sys.path.extend(['/Users/zcj/py_workspace/hello/detr/'])
 #################################################################
-
 n_folds = 5
 seed = 42
 null_class_coef = 0.5
