@@ -52,3 +52,15 @@ print(f"{type(A)}\n{type(B)}")
 a = torch.tensor([3.5])
 print(f'a:{a}, a.item:{a.item()}, int(a):{int(a)}, float(a):{float(a)}')
 print(dir(torch.distributions))
+
+torch.manual_seed(123)
+
+sentence = 'Life is short, eat dessert first'
+dc = {s: i for i, s in enumerate(sorted(sentence.replace(',', '').split()))}
+sentence_int = torch.tensor([dc[s] for s in sentence.replace(',', '').split()])
+
+embed = torch.nn.Embedding(6, 16)
+embedded_sentence = embed(sentence_int).detach()
+
+print(embedded_sentence)
+print(embedded_sentence.shape)
