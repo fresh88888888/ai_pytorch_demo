@@ -11,4 +11,7 @@
         "-p",
         "*_test.py"
     ],
+    "python.analysis.extraPaths": [
+        "./transformer"
+    ],
 }
