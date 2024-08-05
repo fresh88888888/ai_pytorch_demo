@@ -19,11 +19,17 @@ from flwr.server import ServerApp, ServerConfig
 from flwr.server import ServerAppComponents
 from flwr.server.strategy import FedAvg
 from flwr.simulation import run_simulation
+from flwr_datasets import FederatedDataset
 from collections import OrderedDict
 from typing import List, Tuple, Dict, Optional
 
 backend_setup = {"init_args": {"logging_level": ERROR, "log_to_driver": False}}
 transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5, ), (0.5, ))])
+
+
+def normalize(batch):
+    batch["image"] = [transforms(img) for img in batch["image"]]
+    return batch
 
 
 class InfoFilter(logging.Filter):
@@ -232,16 +238,18 @@ def get_weights(net):
 
 
 class FlowerClient(NumPyClient):
-    def __init__(self, net, trainset, testset):
+    def __init__(self, net, trainloader, testloader):
         super().__init__()
         self.net = net
-        self.trainset = trainset
-        self.testset = testset
+        self.trainloader = trainloader
+        self.testloader = testloader
 
     # Train the model
     def fit(self, parameters, config):
         set_weights(self.net, parameters)
-        train_model(self.net, self.trainset)
+        epochs = config["local_epochs"]
+        log(INFO, f"client train for {epochs} epochs.")
+        train_model(self.net, self.trainloader, epochs)
         return get_weights(self.net), len(self.trainset), {}
 
     # Test the model
@@ -249,3 +257,74 @@ class FlowerClient(NumPyClient):
         set_weights(self.net, parameters)
         loss, accuracy = evaluate_model(self.net, self.testset)
         return loss, len(self.testset), {"accuracy": accuracy}
+
+
+def client(context: Context) -> Client:
+    net = SimpleModel()
+    partition_id = int(context.node_config['partition-id'])
+    client_train = train_set[int(partition_id)]
+    client_test = testset
+
+    return FlowerClient(net=net, trainset=client_train, testset=client_test).to_client()
+
+
+# Create an instance of the ClientApp.
+client = ClientApp(client_fn=client)
+
+
+def evaluate(server_round, parameters, config):
+    net = SimpleModel()
+    set_weights(net, parameters)
+
+    _, accuracy = evaluate_model(net, testset)
+    _, accuracy_137 = evaluate_model(net, testset_137)
+    _, accuracy_246 = evaluate_model(net, testset_246)
+    _, accuracy_469 = evaluate_model(net, testset_469)
+
+    log(INFO, "test accuracy on all digitss: %.4f", accuracy)
+    log(INFO, "test accuracy on [1,3,7]: %.4f", accuracy_137)
+    log(INFO, "test accuracy on [2,4,6]: %.4f", accuracy_246)
+    log(INFO, "test accuracy on [4,6,9] %.4f", accuracy_469)
+
+    if server_round == 3:
+        cm = compute_confusion_matrix(net, testset)
+        plot_confusion_matrix(cm, "Final Global Model")
+
+
+def load_data(partition_id):
+    fds = FederatedDataset(dataset="mnist", partitioners={"train": 5})
+    partition = fds.load_partition(partition_id)
+
+    traintest = partition.train_test_split(test_size=0.2, seed=42)
+    traintest = traintest.with_transform(normalize)
+    trainset, testset = traintest['train'], traintest['test']
+
+    train_loader = DataLoader(train_set, batch_size=64, shuffle=True)
+    test_loader = DataLoader(testset, batch_size=64)
+
+    return train_loader, test_loader
+
+
+def fit_config(server_round: int):
+    config_dict = {"local_epochs": 2 if server_round < 3 else 5}
+
+    return config_dict
+
+
+# 策略：联邦平均
+net = SimpleModel()
+params = ndarrays_to_parameters(get_weights(net))
+
+
+def server(context: Context):
+    strategy = FedAvg(min_fit_clients=5, fraction_evaluate=0.0, initial_parameters=params, on_fit_config_fn=fit_config)
+    config = ServerConfig(num_rounds=3)
+
+    return ServerAppComponents(strategy=strategy, config=config)
+
+
+# 创建SreverApp的实例
+server = ServerApp(server_fn=server)
+
+# 开始训练
+run_simulation(server_app=server, client_app=client, num_supernodesq=3, backend_config=backend_setup)
