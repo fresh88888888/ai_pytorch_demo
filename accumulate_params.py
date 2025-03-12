@@ -31,6 +31,13 @@ params_accumulate = ModelParameters()
 
 
 def train_no_accumulate(params: ModelParameters, num_epochs: int = 10, learning_rate: float = 1e-3):
+    """_summary_
+
+    Args:
+        params (ModelParameters): _description_
+        num_epochs (int, optional): _description_. Defaults to 10.
+        learning_rate (float, optional): _description_. Defaults to 1e-3.
+    """
     print(f'Initial parameters: w1: {params.w1.item():.3f}, w2: {params.w2.item():.3f}, b: {params.b.item():.3f}')
     for epoch in range(1, num_epochs+1):
         for (x1, x2), y_target in training_data:
