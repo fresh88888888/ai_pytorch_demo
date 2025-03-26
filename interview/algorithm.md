@@ -1869,7 +1869,7 @@ class Solution {
 ```python
 def generate_parenthesis(n):
     def backtrack(path, left, right):
-        
+
 
 ```
 以下是用 Java 实现的生成括号组合算法：
@@ -1899,4 +1899,389 @@ class Solution {
         }
     }
 }
+```
+###### Wildcard Matching(回溯) 
+
+在 Java 中实现通配符匹配问题，可以使用回溯算法来解决。通配符匹配问题中，? 可以匹配任何单个字符，而 * 可以匹配任意字符序列（包括空字符序列）。实现步骤：
+- 回溯函数：定义一个递归函数 isMatch，用于尝试匹配字符串 s 和模式 p。使用两个索引分别跟踪当前匹配到的字符串 s 和模式 p 的位置。根据当前字符和模式字符的不同情况进行匹配：如果当前字符和模式字符相同，或者模式字符是 ?，则继续匹配下一个字符。如果模式字符是 *，则可以匹配零个或多个字符。如果到达字符串 s 和模式 p 的末尾，且匹配成功，则返回 true。剪枝策略：在遇到 * 时，尝试匹配零个或多个字符，并在不满足条件时回退。
+```java
+public class WildcardMatching {
+
+    public boolean isMatch(String s, String p) {
+        return isMatchHelper(s, p, 0, 0);
+    }
+
+    private boolean isMatchHelper(String s, String p, int sIndex, int pIndex) {
+        // 如果模式匹配完，检查字符串是否也匹配完
+        if (pIndex == p.length()) {
+            return sIndex == s.length();
+        }
+
+        // 如果字符串匹配完，检查模式剩余部分是否都是 '*'
+        if (sIndex == s.length()) {
+            for (int i = pIndex; i < p.length(); i++) {
+                if (p.charAt(i) != '*') {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        if (p.charAt(pIndex) == '*') {
+            // '*' 匹配零个或多个字符
+            return (isMatchHelper(s, p, sIndex, pIndex + 1) ||  // 匹配零个字符
+                    isMatchHelper(s, p, sIndex + 1, pIndex));   // 匹配一个或多个字符
+        }
+
+        if (p.charAt(pIndex) == '?' || p.charAt(pIndex) == s.charAt(sIndex)) {
+            // 当前字符匹配，继续匹配下一个字符
+            return isMatchHelper(s, p, sIndex + 1, pIndex + 1);
+        }
+
+        // 当前字符不匹配，返回 false
+        return false;
+    }
+}
+```
+解释：isMatchHelper 函数：递归地尝试匹配字符串 s 和模式 p。根据当前字符和模式字符的不同情况进行匹配。* 匹配：当遇到 * 时，尝试匹配零个或多个字符，并在不满足条件时回退。结果：最终返回 true 或 false，表示字符串 s 是否能被模式 p 匹配。这种方法通过回溯算法，能够高效地解决通配符匹配问题。通过递归和剪枝策略，确保匹配过程的正确性和效率。
+
+##### 图算法
+
+###### 最短路径：Dijkstra（无负权边）vs Bellman-Ford（支持负权边）
+
+最短路径问题是图论中的一个经典问题，常用于寻找两个点之间的最短路径，Dijkstra算法和Bellman-Ford是两种常见的最短路径算法。
+
+Dijkstra算法：
+- 适用场景：适用于边权重非负的图。
+- 算法思想：使用贪心策略，每次选择当前已知的最短路径中未被访问的节点，并更新相邻节点的最短路路径。使用优先队列（如二叉堆）来高效获取当前最短路径的节点。
+- 时间复杂度：使用二叉堆实现的Dijkstra算法的时间复杂度为O((V + E)log V)，其中V是顶点数，E是边数。
+- 优点：高效，适用于稠密图和稀疏图。
+- 缺点：不能处理带有负权边的图。
+
+Bellman-Ford 算法：
+- 使用场景：适用于边权重为负的图，能够检测负权回路。
+- 算法思想：通过动态规划的方法，逐步松弛所有边最多进行V-1次松弛操作。通过检查是否存在可以进一步松弛的边，来判断图中是否存在负权回路。
+- 时间复杂度：时间复杂度为O(V·E)，其中V是顶点数，E是边数。
+- 优点：能够处理带有负权边的图。能够检测负权回路。
+- 缺点：对于没有负权边的图，效率不如Dijkstra算法。
+
+选择建议：无负权边，如果图中没有负权边，Dijkstra算法通常是更好的选择，因为它更高效。有负权边，如果图中有负权边，Bellman-Ford算法是更适合的选择。
+
+```python
+# Dijkstra 算法（Python）：
+
+import heapq
+
+def dijkstra(graph, start):
+    # 初始化距离字典，所有节点距离都初始化为无穷大
+    distances = {node: float('inf') for node in graph}
+    distances[start] = 0
+    #优先级队列，存储（当前最短距离，节点）
+    priority_queue = [(0, start)]
+
+    while priority_queue:
+        current_distances, current_node = heapq.heappop(priority_queue)
+
+        # 如果当前距离大于已知最短距离，则跳过。
+        if current_distances > distances[current_node]:
+            continue
+
+        for neighbor, weight in graph[current_node].item():
+            distance = current_distances + weight
+
+            # 只有找到更短的路径才更新
+            if distance < distances[neighbor]:
+                distances[neighbor] = distance
+                heapq.heappush(priority_queue, (distance, neighbor))
+    
+    return distances
+
+# 示例图
+graph = {
+    'A': {'B': 1, 'C': 4},
+    'B': {'A': 1, 'C': 2, 'D': 5},
+    'C': {'A': 4, 'B': 2, 'D': 1},
+    'D': {'B': 5, 'C': 1}
+}
+
+start_node = 'A'
+distances = dijkstra(graph, start_node)
+print(distances)
+
+#Bellman-Ford 算法（Python）
+
+def bellman_ford(graph, start):
+    # 初始距离字典，所有节点距离初始化为无穷大
+    distances = {node: float('inf') for node in graph}
+    distances[start] = 0
+
+    # 进行V-1次松弛操作
+    for _ in range(len(graph) - 1):
+        for node in graph:
+            for (neighbor, weight) in graph[node].items():
+                if distances[node] + weight < distances[neighbor]:
+                    distances[neighbor] = distances[node] + weight
+
+    # 检测负权回路
+    for node in graph:
+        for neighbor, weight in graph[node].items():
+            if distances[node] + weight < distances[neighbor]:
+                raise ValueError("Graph contains a negative weight cycle")
+
+    return distances
+
+# 示例图
+graph = {
+    'A': {'B': 1, 'C': 4},
+    'B': {'C': 2, 'D': 5},
+    'C': {'D': 1},
+    'D': {}
+}
+
+start_node = 'A'
+distances = bellman_ford(graph, start_node)
+print(distances)
+```
+###### 最小生成树：Prim算法（贪心）vs Kruskal算法（并查集）
+
+最小生成树（Minimum Spanning Tree, MST）是图论中的一个经典问题，目标是在一个带权重的无向图中找到一棵树，使得树中所有边的权重之和最小，Prim 算法和 Kruskal 算法是两种常见的求解最小生成树的算法。
+
+Prim 算法：
+- 适用场景：适用于稠密图。
+- 算法思想：从一个起始顶点开始，逐步添加最小权重的边，使得新加入的边不会形成环。使用贪心策略，每次选择当前可用的最小权重边，使用优先队列（二叉堆）来高效的获取当前最小权重边。
+- 时间复杂度：使用二叉堆实现的Prim 算法时间复杂度为O((V + E)log V)，其中V是顶点数，E是边数。
+- 优点：适用于稠密图，因为它只需要维护一个优先队列。
+- 缺点：对于稀疏图，效率不如 Kruskal 算法。
+
+Kruskal 算法
+- 适用场景：适用于稀疏图。
+- 算法思想：将所有边按权重从小到大排序，逐个选择权重最小的边，使得新加入的边不会形成环，使用并查集（Union-Find）数据结构来检测环。
+- 时间复杂度：时间复杂度为O(E log E)，其中E是边数。
+- 优点：适用于稀疏图，因为他只需要对边进行排序。使用并查集可以高效地检测环。
+- 缺点：对于稠密图，效率不如Prim 算法。
+
+选择建议：稠密图：如果图中边的数量接近顶点数的平方，Prim 算法通常是更好的选择。稀疏图：如果图中边的数量远小于顶点数的平方，Kruskal 算法是更合适的选择。
+
+```python
+# Prim 算法（Python）
+
+import heapq
+
+def prim(graph, start):
+    mst = []
+    visited = set()
+    min_heap = [(0, start, None)]  # (weight, current_node, previous_node)
+
+    while min_heap:
+        weight, current, previous = heapq.heappop(min_heap)
+        if current in visited:
+            continue
+
+        visited.add(current)
+        if previous is not None:
+            mst.append((previous, current, weight))
+
+        for neighbor, weight in graph[current].items():
+            if neighbor not in visitied:
+                heapq.heappush(min_heap, (weight, neighbor, current))
+
+    return mst
+
+# 示例图
+graph = {
+    'A': {'B': 1, 'C': 4},
+    'B': {'A': 1, 'C': 2, 'D': 5},
+    'C': {'A': 4, 'B': 2, 'D': 1},
+    'D': {'B': 5, 'C': 1}
+}
+
+start_node = 'A'
+mst = prim(graph, start_node)
+print(mst)
+
+# Kruskal 算法（Python）
+
+class UnionFind:
+    def __init__(self, n):
+        self.parent = list(range(n))
+        self.rank = [0] * n
+
+    def find(self, u):
+        if self.parent[u] != u:
+            self.parent[u] = self.find(self.parent[u])
+
+        return self.parent[u]
+
+    def union(self, u, v):
+        root_u = self.find(u)
+        root_v = self.find(v)
+        if root_u != root_v:
+            if self.rank[root_u] > self.rank[root_v]:
+                self.parent[root_v] = root_u
+            elif self.rank[root_u] < self.rank[root_v]>:
+                self.parent[root_u] = root_v
+            else:
+                self.parent[root_v] = root_u
+                self.rank[root_u] += 1
+
+    def kruskal(graph):
+        edges = [(weight, u, v) for u in graph for v, weight in graph[u].items()]
+        edges.sort()
+        mst = []
+        uf = UnionFind(len(graph))
+
+        for u, v, weight in edges:
+            if uf.find(u) != uf.find(v):
+                uf.union(u,v)
+                mst.append((u,v, weight))
+        
+        return mst
+
+# 示例图
+graph = {
+    'A': {'B': 1, 'C': 4},
+    'B': {'A': 1, 'C': 2, 'D': 5},
+    'C': {'A': 4, 'B': 2, 'D': 1},
+    'D': {'B': 5, 'C': 1}
+}
+
+mst = kruskal(graph)
+print(mst)
+```
+###### 社交网络中的好友推荐（广度优先搜索BFS）
+
+在社交网路中，好友推荐是一个常见功能，旨在帮助用户发现潜在好友。广度优先搜索（BFS）是一种常用的图遍历算法，可以用来实现好友推荐功能。BFS从一个起始节点开始，逐层遍历其相邻节点，知道找到目标节点或遍历完所有节点。好友推荐的实现思路：
+- 图表示：将社交网络表示为一个图，其中每个节点代表一个用户，每条边代表两个用户之间的好友关系。
+- BFS遍历：从目标用户开始，使用BFS遍历其好友网络。首先访问目标用户的直接好友，然后访问好友的好友，以此类推。
+- 推荐策略：优先推荐与目标用户有共同好友的用户，可以根据共同好友的数量对推荐结果进行排序。
+
+实现步骤：
+- 构建图：使用邻接表或邻接矩阵表示社交网络。
+- BFS实现：使用队列实现BFS，从目标用户开始，逐层遍历其好友网络。
+- 推荐生成：收集所有符合条件的推荐用户，并根据共同好友数量进行排序。
+
+以下是用 Python 实现的好友推荐算法：
+```python
+from collections import deque, defaultdict
+
+def recommend_friends(graph, user, max_recommendations = 5):
+    # 使用BFS遍历好友网络
+    queue = depue([user])
+    visited = set([user])
+    recommenations = defaultdict(int)
+
+    while queue:
+        current_user = queue.popleft()
+
+        for friend in graph[current_user]:
+            if friend not in visited:
+                visited.add(friend)
+                queue.append(friend)
+
+                # 增加推荐计数
+                if friend != user:
+                    recommendations[friend] += 1
+                
+    # 根据共同好友数量排序推荐结果
+    sorted_recommendations = sorted(recommendations.items(), key= lambda x: x[1], reverse = True)
+
+    # 返回前max_recommendations个推荐
+    return sorted_recommendations[:max_recommendations] 
+
+# 示例社交网络图
+graph = {
+    'A': ['B', 'C', 'D'],
+    'B': ['A', 'D', 'E'],
+    'C': ['A', 'F'],
+    'D': ['A', 'B'],
+    'E': ['B', 'F'],
+    'F': ['C', 'E', 'G'],
+    'G': ['F']
+}
+
+user = 'A'
+recommendations = recommend_friends(graph, user)
+print("Recommended friends for user", user, ":")
+for friend, common_friends in recommendations:
+    print(f"User {friend} with {common_friends} common friends")
+```
+解释：图表示：使用字典表示社交网络图，其中键是用户，值是该用户的好友列表。BFS 遍历：从目标用户开始，使用队列逐层遍历其好友网络。推荐生成：收集所有符合条件的推荐用户，并根据共同好友数量进行排序。这种方法通过 BFS 遍历，能够高效地生成好友推荐。通过优先考虑共同好友数量，可以提高推荐的相关性。
+
+###### 地图导航的最优路径规划（Dijkstra算法）
+
+在地图导航中，寻找从起点到目标点的最优路径是一个常见问题，Dijkstra 算法是一种经典的最短路径算法，适用于边权重非负的图。他可以用于地图导航中的最优路径规划，确保找到从起点到目标点的最短路径。Dijkstra 算法的应用：
+- 图表示：将地图表示为一个图，其中节点代表地点（如交叉路口或地标），边代表连接这些地点的道路，边的权重代表道路的距离或行驶时间。
+- 算法思想：使用贪心策略，每次选择当前已知的最短路径中未被访问的节点，并更新其相邻节点的最短路径。使用优先队列（如二叉堆）来高效地获取当前最短路径的节点。
+- 实现步骤：初始化起点到所有其他节点的距离为无穷大，起点到自身的距离为零。使用优先队列，从起点开始，逐步更新到其他节点的最短距离。当目标节点被访问时，路径规划完成。
+
+以下是用 Python 实现的 Dijkstra 算法，用于地图导航中的最优路径规划：
+```python
+import heapq
+
+def dijkstra(graph, start, end):
+    # 初始化距离字典，所有节点距离初始化为无穷大。
+    distances = {node: float('inf') for node in graph}
+    distances[start] = 0
+
+    # 优先队列。存储（当前最短距离，节点）
+    priority_queue = [(0, start)]
+    # 记录每个节点的前驱节点，用于路径回溯
+    previous_node = {node: None for node in graph}
+
+    while priority_queue:
+        current_distance, current_node = heapq.heappop(priority_queue)
+
+        # 如果当前距离大于已知最短距离，则跳过
+        if current_distance > distances[current_node]:
+            continue
+
+        for neighbor, weight in graph[current_node].items():
+            distance = current_distance + weight
+
+            # 只有找到更短路径时才更新
+            if distance < distacnes[neighbor]:
+                distances[neighbor] = distance
+                pervious_node[neighbor] = current_node
+                heapq.heappush(priority_queue, (distance, neighbor))
+
+    # 回溯路径
+    path = []
+    current = end
+    while current is not None:
+        path.append(current)
+        current = previous_node[current]
+    
+    path.reverse()
+
+    return distances[end], path
+
+# 示例地图图
+graph = {
+    'A': {'B': 1, 'C': 4},
+    'B': {'A': 1, 'C': 2, 'D': 5},
+    'C': {'A': 4, 'B': 2, 'D': 1},
+    'D': {'B': 5, 'C': 1}
+}
+
+start_node = 'A'
+end_node = 'D'
+shortest_distance, shortest_path = dijkstra(graph, start_node, end_node)
+print(f"Shortest distance from {start_node} to {end_node}: {shortest_distance}")
+print(f"Shortest path: {shortest_path}")
+```
+解释：图表示：使用字典表示地图，其中键是节点，值是该节点的相邻节点及其边的权重。优先队列：使用优先队列（二叉堆）高效获取当前最短路径的节点。路径回溯：通过记录每个节点的前驱节点，可以在找到最短路径后回溯出完整的路径。这种方法通过 Dijkstra 算法，能够高效地找到地图导航中的最优路径。通过优先队列和贪心策略，确保路径规划的正确性和效率。
+
+
+
+##### 字符串处理
+
+###### KMP算法：部分匹配表（PMT）构建？
+
+KMP（Knuth-Morris-Pratt）算法是一个高效的字符串匹配算法，用于在一个主串中查找一个模式串的所有出现位置。KMP 算法的核心思想是利用已经匹配的信息，避免重复比较，从而提高匹配效率。部分匹配表（Partial Match Table, PMT），也称为“前缀表”或“失效函数”，是 KMP 算法的关键数据结构。部分匹配表（PMT）的构建：部分匹配表用于记录模式串中每个位置的最长前缀，该前缀同时也是后缀。通过这个表，可以在匹配失败时快速跳过不必要的比较。构建步骤：
+- 初始化：创建一个数组 pmt，长度与模式串相同，用于存储部分匹配表。初始化 pmt[0] 为 0，因为长度为 1 的字符串没有真前缀。
+- 填充表格：使用一个变量 j 表示当前匹配的位置，初始化为 0。从模式串的第二个字符开始，逐个计算每个位置的最长前缀（同时也是后缀）的长度。如果当前字符与前一个字符匹配，则更新 pmt[i] 为 pmt[i-1] + 1。如果不匹配，则回溯到前一个匹配位置，继续比较。
+
+以下是用 Python 实现的部分匹配表构建算法：
+```python
+
 ```
