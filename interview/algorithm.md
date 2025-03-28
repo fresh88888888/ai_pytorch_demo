@@ -2449,4 +2449,349 @@ print("Sensitive words found:", results)
 
 ###### 搜索引擎关键词提示（前缀匹配）
 
-搜索引擎关键词提示是一种常见的功能，旨在根据用户输入的前缀快速提供相关的搜索建议。这种功能通常使用前缀匹配技术来实现，Trie 树（前缀树）是实现这一功能的有效数据结构。
+搜索引擎关键词提示是一种常见的功能，旨在根据用户输入的前缀快速提供相关的搜索建议。这种功能通常使用前缀匹配技术来实现，Trie 树（前缀树）是实现这一功能的有效数据结构。Trie树的应用：Trie树是一种树形数据结构，特别适合处理前缀匹配的问题。通过使用Trie树，可以高效地存储和检索具有相同前缀的关键词。实现步骤：
+- 构建Trie树：把所有关键词插入到Trie树中。每个节点表示一个字符，从根节点到某一节点的路径表示一个关键词。
+- 前缀匹配：从根节点开始，逐个匹配用户输入的前缀字符。如果字符不存在于当前节点的子节点中，则停止匹配。如果到达前缀结尾，收集所有可能的关键词建议。
+
+以下是用 Python 实现的 Trie 树，用于搜索引擎关键词提示：
+```python
+class TrieNode:
+    def __init__(self):
+        self.children = {}
+        self.is_end_of_word = False
+        self.words = []  # 存储以该节点结尾的关键词
+
+class Trie:
+    def __init__(self):
+        self.root = TrieNode()
+
+    def insert(self, word):
+        node = self.root
+        for char in word:
+            if char not in node.children:
+                node.children[char] = TrieNode()
+            
+            node = node.children[char]
+
+        node.is_end_of_word = True
+        node.words.append(word)
+    
+    def search_with_prefix(self, prefix):
+        node = self.root
+        for char in prefix:
+            if char not in node.children:
+                return []
+            
+            node = node.children[char]
+
+        return self._collect_all_words(node)
+
+    def _collect_all_words(self, node):
+        # 收集以当前节点为起点的所有关键词
+        suggestions = node.word[:]
+        for child in node.children.values():
+            suggestions.extend(self._collect_all_words(child))
+
+        return suggestions
+
+# 示例关键词
+keywords = ["apple", "app", "application", "banana", "band", "bandwidth", "orange", "order"]
+trie = Trie()
+for word in keywords:
+    trie.insert(word)
+
+# 示例前缀
+prefix = "ap"
+suggestions = trie.search_with_prefix(prefix)
+print("Suggestions for prefix '{}':".format(prefix), suggestions)
+```
+解释：TrieNode类：表示Trie树的节点，包含子节点字典、单词结尾标志和关键词列表。Trie类：包含插入关键词和前缀匹配的方法。插入操作：将关键词插入到Trie树中，并在单词结尾节点存储关键词。前缀匹配：从根节点开始，逐个匹配前缀字符，收集所有可能得关键词建议。通过Trie树，可以高效的实现搜索引擎关键词提示功能，Trie树在插入和查找任务中具有较高的效率，特别适合处理大规模关键词数据集。
+
+###### 分布式系统中的一致性哈希，设计分布式缓存系统（如Redis Cluster）
+
+一致性哈希是一种特殊的哈希技术，广泛用于分布式系统中，特别是在分布式缓存系统（如Redis Cluster）中。它能够在节点数量变化时，最小化数据的重新分布，从而提高系统的可扩展性和可用性。一致性哈希的设计原理：
+- 哈希环：将哈希空间组织成一个环形结构，通常使用0 ~ 2^32 - 1的范围。每个节点和键都通过哈希函数映射到哈希环上的一个位置。
+- 虚拟节点：为了避免节点在哈希环上分布不均匀，引入了虚拟节点的概念，每个物理节点在哈希环上有多个虚拟节点，这些虚拟节点通过不同的哈希值计算得到。虚拟节点可以有效的减少数据倾斜，提高负载均衡。
+- 数据映射：键通过哈希函数计算得到的哈希值，并映射到哈希环上，顺时针查找第一个遇到的节点（或虚拟节点），将键存储在该节点上。
+- 节点变化处理：当增加和删除节点时，只有部分数据需要重新分布，而不是全部数据。这种特性使得一致性哈希在节点变化时具有较高的效率。
+
+分布式缓存系统的设计：以下是基于一致性哈希设计分布式缓存系统（如 Redis Cluster）的关键步骤：
+- 节点管理：维护一个节点列表，记录每个节点和虚拟节点在哈希环上的位置。使用心跳机制检测节点的健康状况，及时处理节点的增加和删除。
+- 数据存储：根据一致性哈希算法，将键映射到相应的节点上进行存储，在节点变化时，重新计算受影响的键，并将其迁移到新节点。
+- 数据冗余：为了提高数据的可用性，可以引入副本机制，将数据复制到多个节点上。副本的数量和位置可以根据一致性哈希算法动态调整。
+- 请求路由：客户端根据一致性哈希算法计算键的哈希值，并路由到相应的节点进行读写操作。在节点变化时，客户端需要更新路由信息，确保请求能够正确路由到新的节点。
+
+以下是用 Python 实现的一致性哈希算法的简单示例：
+```python
+import hashlib
+import bisect
+
+class ConsistentHash:
+    def __init__(self, replicas = 16):
+        self.replicas = replicas
+        self.keys = []
+        self.nodes = {}
+    
+    def _hash(self , key):
+        return int(hashlib.md5(key.encode()).hexdigest(), 16)
+
+    def add_node(self, node):
+        for i in range(self.replicas):
+            virtual_node = f'{node}:{i}'
+            hash_value = self._hash(virtual_node)
+            bigsect.insort(self.keys, hash_value)
+            self.nodes[hash_value] = node
+    
+    def remove_node(self, node):
+        for i in range(replicas):
+            virtual_node = f'{node}:{i}'
+            hash_value = self._hash(virtual_node)
+            if hash_value in self.keys:
+                self.keys.remove(hash_value)
+                del self.nodes[hash_value]
+
+    def get_node(self, key):
+        if not self.keys:
+            return None
+        
+        hash_value = self._hash(key)
+        idx = bisect.bisect_right(self.keys, hash_value) % len(self.keys)
+
+        return self.nodes[self.keys[idx]]
+
+# 示例
+ch = ConsistentHash()
+ch.add_node("node1")
+ch.add_node("node2")
+ch.add_node("node3")
+
+print(ch.get_node("key1"))  # 输出: 根据一致性哈希算法映射的节点
+print(ch.get_node("key2"))  # 输出: 根据一致性哈希算法映射的节点
+
+ch.remove_node("node2")
+print(ch.get_node("key1"))  # 输出: 根据一致性哈希算法映射的节点（可能变化）
+``` 
+解释：ConsistentHash类：实现一致性哈希算法，包含添加节点，删除节点和获取节点的方法。虚拟节点：通过创建多个虚拟节点，提高负载均衡。哈希环：使用哈新函数将节点和键映射到哈希环上。数据映射：根据一致性哈希算法，将键映射到相应的节点。一致性哈希通过虚拟节点和哈希环，能够在分布式缓存系统中高效地管理节点和数据，提高系统的可扩展性和可用性。
+
+###### 数据库索引设计（B+树）, MySQL的InnoDB引擎索引实现
+
+数据库索引是用于提高数据检索效率的数据结构。在 MySQL 的 InnoDB 存储引擎中，B+ 树是实现索引的核心数据结构。B+ 树是一种平衡树，具有多层结构，能够高效地支持范围查询和精确查询。B+ 树的特点：
+- 多层结构：B+树有多个节点组成，每个节点包含多个键和对应的数据指针，树的高度较低，通常为2-4层能够在少量磁盘I/O操作中完成查找。
+- 所有数据存储在叶子结点：非叶子节点只存储键值和指向子节点的指针，不存储实际数据。叶子结点包含所有的键值和对应的数据，并且叶子结点之间通过链表连接，便于范围查询。
+- 平衡性：B+树是平衡树，所有路径的长度相同，能够保证查询效率。
+- 高扇出：每个节点可以有多个子节点，扇出度高，能够在较少的层集中存储大量数据。
+
+**InnoDB 引擎中的 B+ 树索引**，InnoDB 是 MySQL 的默认存储引擎，它使用 B+ 树实现索引，以下是其实现细节：
+- 聚簇索引：聚簇索引是InnoDB的默认索引类型，表数据按照主键顺序存储，叶子节点存储行数据，非叶子节点存储主键值和页号，聚簇索引决定了数据在磁盘上的物理存储顺序。
+- 二级索引（辅助索引）：二级索引是基于非主键列创建的索引。叶子节点存储索引列和对应的主键值，通过主键值查找聚簇索引获取实际数据。
+- 索引的维护：在插入、更新和删除操作时，InnoDB 会自动维护B+ 树的平衡性，通过页分裂和页合并操作，保证B+树的高效性。
+
+以下是一个简单的 B+ 树结构示例，展示了如何在 InnoDB 中实现索引：
+```yaml
+B+ 树结构示例：
+
+叶子节点：
+[5, data5] -> [15, data15] -> [25, data25] -> [35, data35]
+
+非叶子节点：
+[5, 15, 25, 35]
+```
+解释：叶子节点：存储实际数据，并通过链表连接，便于范围查询。非叶子节点：存储键值和指向子节点的指针，用于快速定位叶子节点。优势：高效查找：B+ 树能够在少量磁盘 I/O 操作中完成查找，适合大规模数据检索。范围查询：通过叶子节点的链表结构，能够高效地支持范围查询。平衡性：B+ 树的平衡性保证了查找效率，适合动态数据集。通过 B+ 树，InnoDB 能够高效地管理索引，提高数据检索性能。B+ 树的设计使得 InnoDB 在处理大规模数据时具有较高的效率和可靠性。
+
+###### 实时推荐系统（图算法），基于用户行为构建图（用户-商品-行为），使用PageRank或Personalized PageRank计算推荐权重？
+
+实时推荐系统是一种根据用户行为和偏好，实时向用户推荐相关商品或内容的系统。通过构建用户-商品-行为图，可以利用图算法（如PageRank或Personalized PageRank）计算推荐权重，从而提供个性化的推荐结果。实时推荐系统的设计：
+- 构建用户-商品-行为图：节点：用户和商品作为图中的节点。边作为用户和商品之间的行为（如点击、购买和评论等），边的权重表示行为的强度和频率。
+- PageRank算法：PageRank 是一种用于评估网页重要性的一种算法，可以应用于推荐系统当中，评估商品的重要性或受欢迎程度。通过迭代计算，更新每个节点的PageRank值，直到收敛。
+- Personalized PageRank算法：在PageRank的基础上，增加了个性化因素，考虑用户的历史行为和偏好。通过设置个性化的随机跳转概率，提高用户感兴趣的商品的PageRank值。
+
+实现步骤：
+- 构建图：使用邻接表或邻接矩阵表示用户-商品-行为图，初始化每个节点的PageRank值。
+- 计算PageRank：迭代更新每个节点的PageRank值，直到收敛。在每次迭代中，根据入边节点的PageRank值和边的权重，更新当前节点的PageRank值。
+- 个性化推荐：根据用户的历史行为，调整随机跳转概率，增加用户感兴趣商品的PageRank值。根据计算得到的PageRank值，为用户生成个性化的推荐列表。
+
+以下是用 Python 实现的简单 PageRank 算法，用于计算商品的推荐权重：
+```python
+import numpy as np
+
+def pagerank(graph, d = 0.85, max_iterations = 100, tol = 1e-6):
+    """
+    Calculate PageRank for a graph.
+
+    :param graph: Adjacency matrix of the graph.
+    :param d: Damping factor, usually set to 0.85.
+    :param max_iterations: Maximum number of iterations.
+    :param tol: Tolerance for convergence.
+    :return: PageRank values for each node.
+    """
+    n = graph.shape[0]
+    pr = np.ones(n) / n   # Initial PageRank values
+    out_links = np.sum(graph, axis = 1)
+
+    for _ in range(max_iterations):
+        new_pr = (1 - d) / n + d * np.dot(graph.T, pr / out_links)
+        if np.linalg.norm(new_pr - pr, ord = 1) < tol:
+            break
+
+        pr = new_pr
+
+    return pr
+
+# 示例图（邻接矩阵）
+# 假设有 4 个商品，边的权重表示用户行为的强度
+graph = np.array([
+    [0, 1, 1, 0],
+    [1, 0, 1, 1],
+    [1, 1, 0, 1],
+    [0, 1, 1, 0]
+])
+
+# 计算 PageRank
+pagerank_values = pagerank(graph)
+print("PageRank values:", pagerank_values)
+```
+解释：pagerank 函数：计算图中每个节点的 PageRank 值。邻接矩阵：表示用户-商品-行为图，边的权重表示行为的强度。PageRank 值：表示每个商品的重要性或受欢迎程度，可以用于生成推荐列表。通过 PageRank 算法，可以计算商品的推荐权重，从而为用户提供个性化的推荐结果。Personalized PageRank 可以进一步考虑用户的历史行为，提高推荐的个性化程度。
+
+###### 高频交易系统（堆与优先队列），使用堆结构快速获取最高买价和最低卖价，时间优先+价格优先的订单匹配策略？
+
+在高频交易系统中，快速获取最高买价和最低卖价是至关重要的。堆（heap）数据结构，特别是优先队列可以高效的实现这一功能。通过维护买单和卖单的优先队列，可以快速的匹配订单，确保交易的高效性和公平性。高频交易系统设计：
+- 订单匹配策略：价格优先，时间优先，在相同价格的订单中，先到的订单优先匹配。使用最小堆（Min-Heap）维护买单，使用最大堆(Max-Heap)维护卖单。
+- 堆结构：买单堆，最小堆，堆顶是最高买价；卖单堆，是最大堆，堆顶是最低卖价。
+- 订单匹配流程：当有新的买单和卖单到达时，首先将其插入堆中。检查堆顶的买单和卖单如果买单价格高于或等于卖单价格，则进行交易匹配。交易匹配成功后，则更新堆顶，继续匹配直到无法匹配为止。
+
+实现步骤：
+- 定义订单结构：订单包含价格、数量和时间戳等信息。
+- 维护买卖堆：使用优先队列（如python的heapq模块）实现最小堆和最大堆。
+- 订单匹配逻辑：实现订单的插入和匹配逻辑，确保价格优先、时间优先的原则。
+
+以下是用 Python 实现的简单高频交易系统，使用堆结构进行订单匹配：
+```python
+import heapq
+import time
+
+class Order:
+    def __init__(self, price, quantity, timestamp):
+        self.price = price
+        self.quantity = quantity
+        self.timestamp = timestamp
+
+    def __lt__(self, other):  #用于最小堆的比较
+        return self.price < other.price if self.price != other.price else self.timestamp < other.timestamp
+
+    def __gt__(self, other):
+        return self.price > other.price if self.price != other.price else self.timestamp > other.timestamp
+
+class TradingSystem:
+    def __init__(self):
+        self.buy_heap = []    #最小堆，维护买单
+        self.sell_heap = []   #最大堆，维护卖单
+    
+    def add_order(self, order, is_buy):
+        if is_buy:
+            heapq.heappush(self.buy_heap, order)
+
+        else:
+            heapq.heappush(self.sell_heap, order)
+
+        self.match_orders()
+
+    def match_orders(self):
+        while self.buy_heap and self.sell_heap and self.buy_heap[0].price >= self.sell_heap[0].price:
+            buy_order = heapq.heappop(self.buy_heap)
+            sell_order = heapq.heappop(self.sell_heap)
+
+            # 匹配逻辑
+            mathched_quantity = min(buy_order.quantity, sell_order.quanity)
+            buy_order.quantity -= macthed_quanity
+            sell_order.quantity -= matched_quantity
+
+            print(f'Matched {mathced_quanity} at price {buy_order.price}')
+
+            # 如果订单完全匹配，重新插入堆
+            if buy_order.quanity > 0:
+                heapq.heappush(self.buy_heap, buy_order)
+            
+            if sell_order.quanity > 0:
+                heapq.heappush(self.sell_heap, sell_order)
+
+# 示例订单
+trading_system = TradingSystem()
+trading_system.add_order(Order(price=100, quantity=5, timestamp=time.time()), is_buy=True)
+trading_system.add_order(Order(price=95, quantity=3, timestamp=time.time()), is_buy=True)
+trading_system.add_order(Order(price=105, quantity=2, timestamp=time.time()), is_buy=False)
+trading_system.add_order(Order(price=90, quantity=4, timestamp=time.time()), is_buy=False)  
+```
+解释：Order 类：表示订单，包含价格、数量和时间戳。TradingSystem 类：维护买单和卖单的堆，实现订单的插入和匹配逻辑。买单堆：最小堆，堆顶是最高买价。卖单堆：最大堆，堆顶是最低卖价。订单匹配：当买单价格高于或等于卖单价格时，进行交易匹配，并更新堆顶。通过堆结构，高频交易系统能够高效地管理和匹配订单，确保交易的实时性和公平性。堆的特性使得插入和删除操作具有较高的效率，适合高频交易场景。
+
+###### 路径规划（Dijkstra/A*算法）(物流配送的最优路线计算), 结合实时交通数据动态调整路径权重, A*算法通过启发式函数加速搜索
+
+在物流配送中，寻找最优路径是一个关键问题，Dijkstra算法和A*算法都是常用的路径规划算法，但A*算法通过引入启发式函数，能够更快地找到目标路径。结合实时交通数据，可以动态调整路径权重。从而优化配送路线。
+- Dijkstra 算法：适用于无权重或无非负权重的图，从起点开始，逐步扩展最短路径，直到到达目标节点。使用优先队列（如二叉堆）来高效获取当前最短路径的节点。
+- A*算法：在Dijkstra 算法算法的基础之上，增加了启发函数，用于估计当前节点到目标节点的代价。启发式函数通常是目标节点的欧几里得距离或曼哈顿距离。通过启发式函数，A*算法能够更快地找到目标路径。
+
+实时交通数据应用，动态权重调整：结合时事交通数据，动态调整路径的权重。例如，拥堵路段的权重增加，舒畅路段的权重减少。通过实时更新权重，优化配送路线，提高配送效率。实现步骤：
+- 图的表示：将地图表示为一个图，节点代表地点，边代表路径，边的权重表示路径的距离或时间。
+- 启发式函数：定义启发式函数，估计从当前节点到目标节点的代价。
+- A*算法实现：使用优先队列，根据当前路径代价和启发式函数的估计值，选择最优节点进行扩展。
+
+以下是用 Python 实现的 A* 算法，用于物流配送的最优路线计算：
+```python
+import heapq
+
+def heurstic(node, goal):
+    # 启发式函数，欧几里得距离
+    return ((node[0] - goal[0]) ** 2 + (node[1] - goal[1]) ** 2) ** 0.5
+
+def a_star(graph, start, goal):
+    open_set = []
+    heapq.heappush(open_set, (0, start))
+    came_from = {}
+
+    g_score = {node: float('inf')for node in graph}
+    g_score[start] = 0
+    f_score = {node: float('inf')for node in graph}
+    f_score[start] = heurstic(start, goal)
+
+    while open_set:
+        _, current = heapq.heappop(open_set)
+
+        if current == goal:
+            return reconstruct_path(came_from, current)
+
+        for neighbor, cost in graph[current].items():
+            tentative_g_score = g_score[current] + cost
+            if tentative_g_score < g_score[neighbor]:
+                came_from[neighbor] = current
+                g_score[neighbor] = tentative_g_score
+                f_score[neighbor] = tentative_g_score + heurstic(neighbor, goal)
+                eapq.heappush((open_set, f_score[neighbor], neighbor))
+
+    return None  # 如果没有找到路径
+
+def reconstruct_path(came_from, current):
+    total_path = [current]
+    while current in came_from:
+        current = came_from[current]
+        total_path.append(current)
+    
+    return total_path[::-1]
+
+# 示例图
+graph = {
+    (0, 0): {(1, 0): 1, (0, 1): 1},
+    (1, 0): {(1, 1): 1, (2, 0): 1},
+    (0, 1): {(0, 2): 1},
+    (1, 1): {(2, 1): 1, (1, 2): 1},
+    (2, 0): {(2, 1): 1},
+    (0, 2): {(1, 2): 1},
+    (1, 2): {(2, 2): 1},
+    (2, 1): {(2, 2): 1},
+    (2, 2): {}
+}
+
+start_node = (0, 0)
+goal_node = (2, 2)
+path = a_star(graph, start_node, goal_node)
+print("Optimal path:", path)
+```
+解释：heuristic 函数：启发式函数，使用欧几里得距离估计从当前节点到目标节点的代价。a_star 函数：实现 A* 算法，使用优先队列根据路径代价和启发式估计值选择最优节点进行扩展。reconstruct_path 函数：根据记录的路径信息，重构从起点到目标节点的最优路径。通过 A* 算法和实时交通数据的结合，可以动态调整路径权重，优化物流配送路线，提高配送效率。
