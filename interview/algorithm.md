@@ -2507,6 +2507,8 @@ print("Suggestions for prefix '{}':".format(prefix), suggestions)
 ```
 解释：TrieNode类：表示Trie树的节点，包含子节点字典、单词结尾标志和关键词列表。Trie类：包含插入关键词和前缀匹配的方法。插入操作：将关键词插入到Trie树中，并在单词结尾节点存储关键词。前缀匹配：从根节点开始，逐个匹配前缀字符，收集所有可能得关键词建议。通过Trie树，可以高效的实现搜索引擎关键词提示功能，Trie树在插入和查找任务中具有较高的效率，特别适合处理大规模关键词数据集。
 
+##### 真实场景中算法的应用
+
 ###### 分布式系统中的一致性哈希，设计分布式缓存系统（如Redis Cluster）
 
 一致性哈希是一种特殊的哈希技术，广泛用于分布式系统中，特别是在分布式缓存系统（如Redis Cluster）中。它能够在节点数量变化时，最小化数据的重新分布，从而提高系统的可扩展性和可用性。一致性哈希的设计原理：
@@ -2795,3 +2797,295 @@ path = a_star(graph, start_node, goal_node)
 print("Optimal path:", path)
 ```
 解释：heuristic 函数：启发式函数，使用欧几里得距离估计从当前节点到目标节点的代价。a_star 函数：实现 A* 算法，使用优先队列根据路径代价和启发式估计值选择最优节点进行扩展。reconstruct_path 函数：根据记录的路径信息，重构从起点到目标节点的最优路径。通过 A* 算法和实时交通数据的结合，可以动态调整路径权重，优化物流配送路线，提高配送效率。
+
+###### 反转链表实现？
+
+反转链表是一个经典的算法问题，要求将一个单向链表的元素顺序颠倒，这个问题可以通过迭代或递归的方式解决。
+
+迭代方式：迭代方式通过遍历链表，逐个调整指针，从而反转链表。实现步骤：
+- 初始化指针：使用三个指针prev,current和next来遍历链表。prev初始化为None，current初始化为链表的头结点。
+- 遍历链表：遍历链表，将将current的next指针指向prev，从而反转链表的方向。更新prev和current指针继续遍历。
+- 更新头结点：便利结束后，prev指向新的头结点。
+
+```python
+class ListNode:
+    def __init__(self, value = 0, next = None):
+        self.value = value
+        self.next = next
+
+    def reverse_linked_list(head):
+        prev = None
+        current = head
+
+        while current is not None:
+            next_node = current.next  # 暂存下一个节点
+            current.next = prev       # 反转当前节点的指针
+            prev = current            # 移动prev到当前节点
+            current = next_node       # 移动到下一个节点
+
+        return prev    # prev是新的头结点。
+
+# 示例链表：1 -> 2 -> 3 -> 4
+head = ListNode(1, ListNode(2, ListNode(3, ListNode(4))))
+reversed_head = reverse_linked_list(head)
+
+# 打印反转后的链表
+current = reversed_head
+while current:
+    print(current.value, end=" -> " if current.next else "")
+    current = current.next
+```
+递归方法：递归方式通过递归调用反转链表的子问题，从而反转整个链表。实现步骤：
+- 递归调用：递归调用反转子链表，直到到达链表的末尾。
+- 反转指针：在回溯的过程中，反转每个节点的next指针。
+- 更新头结点：递归结束后，返回新的头结点。
+
+```python
+def reverse_linked_list_recursive(head):
+    if head is None or head.next is None:
+        return head
+
+    new_head = reverse_linked_list_recursive(head.next)
+    head.next.next = head
+    head.next = None
+
+    return new_head
+
+# 示例链表：1 -> 2 -> 3 -> 4
+head = ListNode(1, ListNode(2, ListNode(3, ListNode(4))))
+reversed_head = reverse_linked_list_recursive(head)
+
+# 打印反转后的链表
+current = reversed_head
+while current:
+    print(current.value, end=" -> " if current.next else "")
+    current = current.next
+```
+解释：ListNode类，表示链表的节点，包含值和指向下一个节点的指针。迭代方法：通过遍历链表，逐个调整指针，反转链表的方向。递归方法：通过递归调用反转链表子链表，在回溯过程中反转指针。这两种方法都能有效地反转单向链表。迭代方法更直观，而递归方法更简洁，但需要注意递归深度。
+
+###### 最长无重复子串（滑动窗口+哈希表记录字符最后出现位置）
+
+最长无重复子串问题是经典的字符串问题，要求在给定字符串中找到最长的子串，其中所有字符都是唯一的。这个问题可以通过滑动窗口技术高效地解决。滑动窗口技术：滑动窗口是一种常用的技术，用于解决数组或字符串中的子串或子数组问题。它通过维护一个窗口，不断调整窗口的起始和结束位置，从而找到满足条件的最优解。实现步骤：
+- 初始化窗口：使用两个指针 left 和 right 表示当前窗口的起始和结束位置。使用一个集合或字典记录当前窗口内的字符。
+- 扩展窗口：移动 right 指针，扩展窗口，并将新字符加入集合。如果新字符已经在集合中，说明出现重复，移动 left 指针，直到重复字符被移除。
+- 更新最长子串：在每次扩展窗口后，更新最长无重复子串的长度。
+
+```python
+def length_of_longest_substring(s):
+    char_index_map = {}
+    left = 0
+    max_length = 0
+
+    for right in range(len(s)):
+        if s[right] in char_index_map:
+            # 移动left指针，直到重复字符被移除
+            left = max(char_index_map[right] + 1, left)
+
+        # 更新字符的索引
+        char_index_map[s[right]] = right
+
+        # 更新最长无重复子串的长度
+        max_length = max(max_length, right - left + 1)
+    
+    return max_length
+
+# 示例字符串
+s = "abcabcbb"
+length = length_of_longest_substring(s)
+print("Length of longest substring without repeating characters:", length)
+```
+解释：char_index_map，字典，记录每个字符最后出现的索引。left和right指针，表示当前窗口的起始和结束位置。滑动窗口：通过移动right指针扩展窗口，移动left指针缩小窗口，确保窗口内无重复字符。更新最长子串：在每次扩展窗口后，更新最长无重复子串的长度。通过滑动窗口技术，可以在线性时间内找到最长无重复子串，效率高且实现简单。
+
+###### 实现LRU缓存，哈希表（快速查找） + 双向链表（维护访问顺序）
+
+LRU（Least Recently Used）缓存是一种常用的缓存淘汰策略，用于管理有限的缓存空间。LRU缓存的核心思想是淘汰最近最少使用的数据，实现LRU缓存通常使用哈希表和双向链表的组合。哈希表：用于快速查找缓存中的数据。双向链表：用于维护数据的访问顺序，便于在缓存容量满时快速淘汰最近最少使用的数据。实现步骤：
+- 定义缓存节点：每个节点包含键、值和指向前后节点的指针。
+- 初始化缓存：使用哈希表存储键和节点的映射。使用双向链表维护节点的访问顺序，最近使用的节点在链表头部，最近未使用的节点在链表尾部。
+- 缓存操作：获取数据：如果数据在缓存中，将其移动到链表的头部，表示最近使用，如果不在缓存中，则返回-1。插入数据：如果数据已存在，更新其值并移动到链表的头部；如果不存在，插入到链表的头部。如果缓存已满，则淘汰链表尾部的节点。
+
+以下是用 Python 实现的 LRU 缓存：
+```python
+class ListNode:
+    def __init__(self, key = None, value = None):
+        self.key = key
+        self.value = value
+        self.prev = None
+        self.next = None
+
+class LRUCache:
+    def __init__(self, capacity: int):
+        self.capacity = capacity
+        self.cache = {}             # 哈希表，存储节点的键和映射
+        self.head = ListNode()      # 伪头结点
+        self.tail = ListNode()      # 伪尾结点
+        self.head.next = self.tail
+        self.tail.prev = self.head
+    
+    def get(self, key: int) -> int:
+        if key in self.cache:
+            node = self.cache[key]
+            self.move_to_head(node)
+
+            return node.value
+        
+        return -1
+
+    def put(self, key: int, value: int) -> None:
+        if key in self.cache:
+            node = self.cache[key]
+            node.value = value
+            self.move_to_head(node)
+        else:
+            if len(self.cache) >= self.capacity:
+                tail = self.tail.prev
+                self.remove_node(tail)
+                del self.cache[tail.key]
+            
+            new_node = ListNode(key, value)
+            self.cache[key] = new_node
+            self._add_node(new_node)
+    
+    def _add_node(self, node: ListNode) -> None:
+        """将节点添加到链表头部"""
+        node.prev = self.head
+        node.next = self.head.next
+        self.head.next.prev = node
+        self.head.next = node
+
+    def _remove_node(self, node: ListNode) -> None:
+        """将节点从链表中移除"""
+        prev = node.prev
+        next = node.next
+        prev.next = next
+        next.prev = prev
+
+    def _move_to_head(self, node: ListNode) -> None:
+        """将节点移动到链表头部"""
+        self._remove_node(node)
+        self._add_node(node)
+
+# 示例使用
+lru_cache = LRUCache(2)
+lru_cache.put(1, 1)
+lru_cache.put(2, 2)
+print(lru_cache.get(1))  # 返回 1
+lru_cache.put(3, 3)      # 淘汰键 2
+print(lru_cache.get(2))  # 返回 -1 (未找到)
+lru_cache.put(4, 4)      # 淘汰键 1
+print(lru_cache.get(1))  # 返回 -1 (未找到)
+print(lru_cache.get(3))  # 返回 3
+print(lru_cache.get(4))  # 返回 4
+```
+解释：ListNode 类：表示双向链表的节点，包含键、值和指向前后节点的指针。LRUCache 类：实现 LRU 缓存，包含哈希表和双向链表。get 方法：获取数据，如果数据在缓存中，将其移动到链表头部。put 方法：插入数据，如果数据已存在，更新其值并移动到链表头部；如果不存在，插入到链表头部，如果缓存已满，淘汰链表尾部的节点。_add_node 方法：将节点添加到链表头部。_remove_node 方法：将节点从链表中移除。_move_to_head 方法：将节点移动到链表头部。通过哈希表和双向链表的组合，LRU 缓存能够在常数时间内完成数据的查找和更新，并高效地淘汰最近最少使用的数据。
+
+###### Redis 使用跳表来实现有序集合（Sorted Set）
+
+Redis使用跳表来实现有序集合（Sorted Set），这是因为跳表在插入、删除和查找操作上都能提供平均O(log n)的时间复杂度，同时实现相对简单。
+- 跳表结构：跳表是一种多层链表结构，每一层都是一个有序的链表。最底层包含所有元素而上层是对底层的抽样。每个节点包含两个指针，一个指向同一层的下一个节点，另一个指向下一层的同一个节点。
+- 节点结构：每个节点包含一个成员对象（member）和一个分值（score），成员对象是唯一的，而分值是用于排序，节点按分值排序，如果分值相同，则按成员对象的字典顺序排序。
+- 层高随机化：跳表的层高是通过随机算法决定的，新节点的层高是通过类似”投硬币“方式决定的，直到投出反面为止。这种方式保证了跳表的层高在O(log n)级别。
+- 插入操作：插入一个新节点时，首先确定新节点的层高，然后从最高层开始，将新节点插入到每一层的适当位置。
+- 删除操作：删除一个结点时，从最高层开始，逐渐删除该节点。
+- 查找操作：查找操作从最高层开始，逐渐向下查找，知道找到目标节点后确定目标节点不存在为止。
+- 范围查询：跳表支持高效的范围查询，可以快速找到分值在给定范围内的所有节点。
+- 内存效率：跳表在内存使用上比平衡树更为高效，因为它不需要存储平衡信息（如红黑树的颜色信息）。
+
+Redis 使用跳表来实现有序集合（Sorted Set）：
+```python
+import random
+
+class Node:
+    def __init__(self, score, member):
+        self.score = score
+        self.member = member
+        self.forward = []  # 存储每一层的下一个节点
+    
+class SkipList:
+    def __init__(self, max_level):
+        self.max_level = max_level
+        self.header = self.create_node(max_level, None, None)
+        self.level = 0
+    
+    def create_node(self, level, score, member):
+        node = Node(score, member)
+        node.forward = [None] * level
+
+        return node
+
+    def random_level(self):
+        level = 1
+        while random.random() < 0.5 and level < max_level:
+            level += 1
+
+        return level
+
+    def insert(self, score, member):
+        update = [None] * self.max_level
+        current = self.header
+
+        # 从最高层开始查找插入位置
+        for i in range(self.level - 1,-1, -1):
+            while current.forward[i] and current.forward[i].score < score:
+                current = current.forward[i]
+            
+            update[i] = current
+
+        level = self.random_level()
+        if level > self.level:
+            for i in range(self.level, level):
+                update[i] = self.header
+            
+            self.level = level
+
+        new_node = self.create_node(level, score, member)
+        for i in range(level):
+            new_node.forward[i] = update.forward[i]
+            update.forward[i] = new_node
+
+    def search(self, score):
+        current = self.header
+        for i in range(self.level - 1, -1, -1):
+            while current.forward[i] and current.forward[i].score < score:
+                current = current.forward[i]
+
+        current = current.forward[0]
+        if current and current.score = score:
+            return current.member
+
+        return None
+                    
+    def delete(self, score):
+        update = [None] * self.max_level
+        current = self.header
+        for i in range(self.level - 1, -1, -1):
+            while current.forward[i] and current.forward[i].score < score:
+                current = current.forward[i]
+            
+            update[i] = current
+
+        current = current.forward[0]
+        if current and current.score == score:
+            for i in range(self.level):
+                if update[i].forward[i] != current:
+                    break
+                
+                update[i].forward[i] = current.forward[i]
+
+            while self.level > 1 and not self.header.forward[self.level - 1]:
+                self.level -= 1
+
+            return True
+
+        return False
+    
+# 示例使用
+skiplist = SkipList(4)
+skiplist.insert(1, "a")
+skiplist.insert(2, "b")
+skiplist.insert(3, "c")
+
+print(skiplist.search(2))  # 输出: b
+skiplist.delete(2)
+print(skiplist.search(2))  # 输出: None
+```
+解释：Node 类：表示跳表中的节点，包含分值（score）、成员对象（member）和指向下一个节点的指针列表（forward）。SkipList 类：实现跳表的基本操作，包括插入、查找和删除。random_level：随机生成新节点的层高。insert：插入新节点，并更新每一层的指针。search：查找指定分值的节点。delete：删除指定分值的节点，并更新每一层的指针。
