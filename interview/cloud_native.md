@@ -570,4 +570,69 @@ Kubernates提供了Services抽象，允许用户在不同的Pod之间负载均�
 - 扩展的CiliumNetworkPolicy：作为自定义资源定义(CustomResourceDefinition)支持L3到L7为入口和出口配置策略。
 - CiliumClusterwideNetworkPolicy：这是一个集群范围内的自定义资源定义，用于指定由Cilium强制执行的集群范围策略。其规范与 CiliumNetworkPolicy 相同，但没有指定命名空间。
 
-CiliumNetworkPolicy是Cilium提供的一种网络策略资源，用于在Kubernates集群中提供更细粒度的安全控制，它扩展了标准的Kubernates NetworkPolicy，支持OSI模型的第三层（L3）、第四层（L4）和第七层（L7）定义网络访问规则。允许用户基于标签、IP地址、DNS名称等条件定义网络访问规则，实现精确控制哪些Pod可以相互通信，以及可以使用哪些协议和端口。支持L3和L4的网络策略，同时在L7层提供常见协议（如HTTP、gRPC、Kafka）的支持。除了命名空间范围的策略，Cilium还提供CiliumClusterwideNetworkPolicy，用于在整个集群中强制强制实施一致的安全策略。将安全性与工作负载解耦，利用标签和元数据来管理网络策略，从而避免了因IP地址变化而频繁更新安全规则的问题。
+CiliumNetworkPolicy是Cilium提供的一种网络策略资源，用于在Kubernates集群中提供更细粒度的安全控制，它扩展了标准的Kubernates NetworkPolicy，支持OSI模型的第三层（L3）、第四层（L4）和第七层（L7）定义网络访问规则。允许用户基于标签、IP地址、DNS名称等条件定义网络访问规则，实现精确控制哪些Pod可以相互通信，以及可以使用哪些协议和端口。支持L3和L4的网络策略，同时在L7层提供常见协议（如HTTP、gRPC、Kafka）的支持。除了命名空间范围的策略，Cilium还提供CiliumClusterwideNetworkPolicy，用于在整个集群中强制强制实施一致的安全策略。将安全性与工作负载解耦，利用标签和元数据来管理网络策略，从而避免了因IP地址变化而频繁更新安全规则的问题。CiliumNetworkPolicy的结构：Metadata：描述策略的元数据，包括策略名称、命名空间和标签。Spec：包含一个规则基础的字段，用于定义具体的网络策略规则。Specs：包含规则基础列表的字段，适用于余姚自动添加或移除多个规则的情况。Status：提供是否成功应用了策略的状态。CiliumNetworkPolicy适用于需要细粒度网络策略的微服务架构，特别是Kubernates环境中，它可以帮助用户在应用层面定义更复杂的访问控制规则。提高集群的安全性和可观测性。
+```go
+type CiliumNetworkPolicy struct {
+        // +deepequal-gen=false
+        metav1.TypeMeta `json:",inline"`
+        // +deepequal-gen=false
+        metav1.ObjectMeta `json:"metadata"`
+
+        // Spec is the desired Cilium specific rule specification.
+        Spec *api.Rule `json:"spec,omitempty"`
+
+        // Specs is a list of desired Cilium specific rule specification.
+        Specs api.Rules `json:"specs,omitempty"`
+
+        // Status is the status of the Cilium policy rule
+        // +deepequal-gen=false
+        // +kubebuilder:validation:Optional
+        Status CiliumNetworkPolicyStatus `json:"status"`
+}
+```
+
+CiliumClusterwideNetworkPolicy(CCNP) 与 CiliumNetworkPolicy 类似但有以下两个区别：非命名空间和集群范围，有CiliumClusterwideNetworkPolicy定义的策略是非命名空间的，并且适用于整个集群范围。启用节点选择器，它允许使用节点选择器来定义策略。CiliumClusterwideNetworkPolicy(CCNP)是Cilium提供的集群级网络策略资源，用于在Kubernates集群中实施全局安全规则。与标准的NetworkPolicy和CiliumNetworkPolicy不同，CCNP具备跨命名空间控制能力，可覆盖整个集群的网络流量。策略规则自动应用于所有命名空间，无需为每个命名空间单独配置，支持节点级别的网络访问控制，例如kubelet API的访问范围。作为最高优先级策略层，可覆盖应用级别的网络策略冲突。与CiliumNetworkPolicy形成层次化的策略体系，实现默认拒绝 + 例外放行的零信任模型。CCNP与CiliumNetworkPolicy配合使用，CCNP定义基础安全边界，应用级策略处理业务逻辑。通过Hubble监控策略的执行效果，确保策略规则未阻断正常业务流量。在混合云场景中结合ClusterMesh实现跨集群策略同步。
+```go
+type CiliumClusterwideNetworkPolicy struct {
+        // Spec is the desired Cilium specific rule specification.
+        Spec *api.Rule
+
+        // Specs is a list of desired Cilium specific rule specification.
+        Specs api.Rules
+
+        // Status is the status of the Cilium policy rule.
+        //
+        // The reason this field exists in this structure is due a bug in the k8s
+        // code-generator that doesn't create a `UpdateStatus` method because the
+        // field does not exist in the structure.
+        //
+        // +kubebuilder:validation:Optional
+        Status CiliumNetworkPolicyStatus
+}
+```
+
+CiliumCIDRGroup(CCG)：是Cilium提供的一种用于管理CIDR块的功能，允许管理员在CiliumNetworkPolicy中引用一组CIDR块，这种机制使得网络策略的配置更加灵活和高效，尤其适用于对外部CIDR块进行策略控制的场景，CiliumCIDRGroup目前处于Beta阶段，与Cilium Agent管理的Endpoint资源不同，CiliumCIDRGroup需要管理员手动管理。任何与CiliumCIDRGroup相关的流量都会被注释为CCG的名称和标签，这有助于流量的监控和分析。以下是一个CiliumCIDRGroup的示例配置：
+```yaml
+apiVersion: cilium.io/v2alpha1
+kind: CiliumCIDRGroup
+metadata:
+  name: vpn-example-1
+  labels:
+    role: vpn
+spec:
+  externalCIDRs:
+  - "10.48.0.0/24"
+  - "10.16.0.0/24"
+
+# 然后，可以在CiliumNetworkPolicy中通过fromCIDRSet或toCIDRSet指令引用这个CIDR组：
+
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: from-vpn-example
+spec:
+  endpointSelector: {}
+  ingress:
+  - fromCIDRSet:
+    - cidrGroupRef: vpn-example-1
+```
