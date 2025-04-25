@@ -3089,3 +3089,60 @@ skiplist.delete(2)
 print(skiplist.search(2))  # 输出: None
 ```
 解释：Node 类：表示跳表中的节点，包含分值（score）、成员对象（member）和指向下一个节点的指针列表（forward）。SkipList 类：实现跳表的基本操作，包括插入、查找和删除。random_level：随机生成新节点的层高。insert：插入新节点，并更新每一层的指针。search：查找指定分值的节点。delete：删除指定分值的节点，并更新每一层的指针。
+
+###### 斐波那契数列
+
+状态定义：F(n) = F(n-1) + F(n-2)，边界条件：F(0) = 0, F(1) = 1。代码实现：
+```python
+def fibonacci(n):
+    if n <= 1:
+        return n
+    
+    prev, curr = 0, 1
+    for _ in range(2, n + 1):
+        prev, curr = curr, prev + curr
+
+    return curr
+```
+递归定义：F(n) = F(n-1) + F(n-2)，滚动变量优化，减少空间占用，斐波那契变形问题（如跳台阶问题）可采用相同思路。
+
+###### 线性动态规划
+
+线性动态规划：指的是状态按照一维顺序递推的动态规划问题，通常适用于数组和序列问题。解题步骤：
+- 定义状态：设dp[i]为某个子问题的最优解或计数。
+- 确定状态转移方程：dp[i] = max(dp[i-1] + nums[i], nums[i])
+- 初始化：处理 base case，如dp[0] = nums[0]
+- 计算顺序：自底向上迭代计算，避免重复子问题计算
+
+最大子数组和：给定一个整数数组nums，找到一个具有最大和的连续子数组（子数组最少包含一个元素），返回其最大和。状态定义：设dp[i]表示以nums[i]结尾的最大连续子数组和：dp[i] = max(dp[i-1] + nums[i], nums[i])，边界条件：dp[0] = nums[0]，代码实现：
+```python
+def max_sub_array(nums):
+    max_sum = nums[0]
+    curr_sum = nums[0]
+
+    for i in range(1, len(nums)):
+        curr_sum = max(curr_sum + nums[i], nums[i])
+        max_sum = max(max_sum, curr_sum)
+    
+    return max_sum
+```
+
+爬楼梯：假设你正在爬楼梯，需要n阶才能到达顶部。每次可以爬1节或2阶，求有多少种不同的方法爬到顶部？状态定义：设dp[i]为爬到第i级楼梯的方法数：dp[i] = dp[i - 1] + dp[i - 2]。边界条件：dp[1] = 1，dp[2] = 2，代码实现：
+```python
+def climb_stairs(n):
+    if n <= 2:
+        return n
+    
+    prev, curr = 1, 2
+    for _ in range(3, n + 1):
+        prev, curr = curr, prev + curr
+    
+    return curr
+```
+时间复杂度：O(n), 空间复杂度为O(1)（使用滚动数组优化）
+
+最小路径和：给定一个m x n的网格grid，每个位置都有一个非负整数，找到一条从左上角到右下角的最小路径和。状态定义：设dp[i][j]为到达(i,j)位置的最小路径和：dp[i][j] = min(dp[i-1][j], dp[i][j-1]) + grid[i][j]，边界条件：dp[0][j] = dp[0][j-1] + grid[0][j], dp[i][0] = dp[i-1][0] + grid[i][0]。代码实现：
+```python
+def min_path_sum(grid):
+    
+```

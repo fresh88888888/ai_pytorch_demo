@@ -636,3 +636,412 @@ spec:
   - fromCIDRSet:
     - cidrGroupRef: vpn-example-1
 ```
+
+CRD(Custom Resource Definition)是Kubernates中用于扩展API的机制，允许用户定义新的资源类型。通过CRD，可以再集群中注册自定义资源，并使用Kubernates的原生API和工具进行管理。在Kubernates中管理Pod时，Cilium会为每个由Cilium管理的Pod创建一个自定义资源定义(CRD)，类型为CiliumEndpoint。每个CiliumEndpoint的名称和命名空间与对应的Pod相同。CiliumEndpoint对象包含与 cilium-dbg endpoint get 命令的JSON输出相同的信息，位于.status字段下，并且可以为集群中所有Pod获取这些信息。通过添加 -o json 选项，可以导出有关每个端点的更多信息。这包括端点的标签、安全身份以及对其生效的策略。
+
+##### Kubernates Network
+
+Kubernates网络，Kubernates网络模型：
+- 每个Pod都有自己的IP地址。
+- Pod内的容器共享Pod的IP地址，并且可以相互自由通信。
+- Pod可以使用自己的IP地址与集群中其他所有的Pod进行通信（无需NAT）。
+- 使用网络策略来定义隔离（限制每个Pod可以通信的内容等）。
+
+Pod可以被看作主机或虚拟机一样（它们都拥有唯一的 IP 地址），Pod中的容器则非常像主机或虚拟机中运行的进程（它们运行在同一个网络命名空间中共享一个 IP 地址）。这种模型使得微服务更容易从主机或虚拟机迁移到Kubernates管理的Pod中。由于隔离使用**网络策略**，而不是网络结构，因此还是很容易理解的。这种网络类型被称为”**扁平网络**“。当然Kubernates也支持将主机端口映射到Pod的功能，或者共享主机IP地址的主机网络命名空间内直接运行Pod。Kubernates内置的网络支持kubenet，kubenet提供一些基本的网络连接。最常见的做法还是使用第三方插件，通过 CNI（容器网络接口）API 插入 Kubernetes。CNI插件主要两种：网络插件，负责将Pod连接到网络；IPAM（IP地址管理）插件，负责分配Pod IP地址。
+
+Kubernates服务提供了一种对一组Pod的访问抽象为网络服务的方法，这组Pod通常使用标签选择器来定义，在集群内，网络服务通常表示为虚拟IP地址，kube-proxy会在这组支持服务的Pod之间负载均衡连接到虚拟IP。虚拟IP可以通过Kubernates DNS来发现。DNS名称和虚拟IP地址在服务的生命周期内保持不变，即使支持服务的Pod可能被创建或销毁，支持服务的Pod数量也可能随时间变化。Kubernates服务还可以定义从集群外部访问服务的的方式。例如，使用节点端口（NodePort），服务可以通过集群中每个节点上的特定端口访问。或使用负载均衡器，网络负载均衡器提供了一个虚拟IP地址，服务可以通过该地址从集群外部访问。
+
+Kubernates DNS服务，每个Kubernates集群都提供一个DNS服务。每个Pod和每个服务都可以通过Kubernates DNS 服务发现。Kubernates DNS服务是作为Kubernates 服务实现的，该服务映射到一个或多个DNS Pod（通常是 CoreDNS），这些DNS Pod像其他任何Pod一样被调度。集群中的Pod被配置为Kubernates DNS服务，DNS 搜索列表包括 Pod 自身的命名空间和集群的默认域。如果在 Kubernetes 命名空间 bar 中有一个名为 foo（Pod命名空间）的服务，那么同一命名空间中的 Pod 可以通过 foo（Pod命名空间）访问该服务，而其他命名空间中的 Pod 可以通过 foo（集群命名空间）.bar（Pod命名空间） 访问该服务。
+
+出站NAT（Network Address Translation，网络地址转换）：是一种网络技术，用于在数据包从内部网络发送到外部网络是，修改数据包的源IP地址。NAT 的另一个常见用例是负载均衡。在这种情况下，负载均衡器会执行 DNAT（目标网络地址转换），将传入连接的目标 IP 地址更改为其要进行负载均衡的设备的 IP 地址。然后，负载均衡器会对响应数据包进行反向 NAT，这样源设备和目标设备都不会察觉到映射正在进行。
+- 源地址转换：当内部网络中的设备发送数据包到外部网络时，NAT设备（如路由器或防火墙），会将数据包的源IP地址从私有IP地址转换为公有IP地址。
+- 端口映射：为了区分不用内部设备的数据包，NAT设备会使用端口映射技术，将不同的内部IP地址和端口号映射到公有IP地址和端口号。
+- 返回数据包处理：当外部网络返回数据包时，NAT设备会根据端口映射表，将公有IP地址和端口号转换回原始的私有IP地址和端口号，并将数据包转发给相应的内部设备。
+
+应用场景：
+- 家庭和办公网络（地址转换）：家庭和办公网络中的路由器通常使用出站 NAT，将内部设备的私有 IP 地址转换为公有 IP 地址，使其能够访问互联网。
+- 数据中心和云计算（解决IP地址不足，隐藏内部网络结构）：在数据中心和云计算环境中，出站 NAT 用于隐藏内部网络结构，增强安全性，并解决 IP 地址不足的问题。
+- Kubernetes 集群（地址转换）：在 Kubernetes 集群中，出站 NAT 用于将 Pod 的私有 IP 地址转换为节点的公有 IP 地址，使 Pod 能够与外部网络通信。
+
+- 优点：增强安全性：通过隐藏内部网络结构，出站 NAT 可以增强网络安全性，防止外部攻击。解决 IP 地址不足：通过复用公有 IP 地址，出站 NAT 可以解决 IPv4 地址资源有限的问题。简化网络管理：出站 NAT 可以简化网络管理，减少对公有 IP 地址的需求。
+- 缺点：性能开销：地址转换和端口映射会带来一定的性能开销，可能影响网络性能。复杂性：出站 NAT 的配置和管理相对复杂，需要专业的网络知识和技能。兼容性问题：某些应用和协议可能不兼容 NAT，导致通信问题。
+
+DNS：虽然网络数据包在网络中的传输是通过 IP 地址确定的，但用户和应用程序通常希望使用众所周知的名称来标识网络目的地，这些名称即使底层 IP 地址发生变化也保持一致。例如，将 google.com 映射到 216.58.210.46。这种从名称到 IP 地址的转换是由 DNS（域名系统）处理的。DNS 运行在迄今为止描述的基础网络之上。每个连接到网络的设备通常配置有一个或多个 DNS 服务器的 IP 地址。当应用程序想要连接到一个域名时，会向 DNS 服务器发送一条 DNS 消息，DNS 服务器随后会响应该域名映射到哪个 IP 地址的信息。然后，应用程序可以根据选定的 IP 地址启动连接。
+
+MTU（最大传输单元）：网络链路的最大传输单元（MTU）是指可以通过该网络链路发送的最大数据包大小。通常，网络中的所有链路都配置相同的 MTU，以减少数据包在穿越网络时需要分片的情况，从而显著提高网络性能。此外，TCP 会尝试学习路径 MTU，并根据网络路径中任何链路的最小 MTU 调整每个网络路径的数据包大小。当应用程序尝试发送超过单个数据包容量的数据时，TCP 会将数据分片为多个 TCP 段，以确保不超过 MTU。大多数网络的链路 MTU 为 1,500 字节，但某些网络支持 9,000 字节的 MTU。在 Linux 系统中，较大的 MTU 可以导致 Linux 网络栈在发送大量数据时使用的 CPU 更少，因为它需要处理的数据包数量更少。
+
+覆盖网络(Overlay Networks)：覆盖网络是一种现有物理网络（称为底层网络，Underlay）基础上构建的虚拟网络技术。它通过在网络层之上添加一层逻辑网络，使得网络流量可以在不同物理网络之间传输，而不需要修改底层网络基础设施。覆盖网络广泛应用于数据中心、云计算和容器编排等场景。特别是在需要跨越多个物理网络或子网的情况下。从连接到覆盖网络的设备的角度来看，它看起来就像一个普通的网络。有许多不同类型的覆盖网络使用不同的协议来实现这一点，但总体来说，它们都具有相同的共性，即将一个网络数据包（称为内部数据包）封装在一个外部网络数据包中。通过这种方式，底层网络只看到外部数据包，而不需要理解如何处理内部数据包。在其上“叠加”一层虚拟网络，实现业务流量的隔离、灵活路由和多租户支持。覆盖网络如何知道将数据包发送到哪里，取决于覆盖网络的类型和它们使用的协议。同样，数据包的具体封装方式在不同类型的覆盖网络之间也有所不同。例如，在 VXLAN 的情况下，内部数据包被封装并作为 UDP 数据包在外部数据包中发送。
+- 逻辑网络构建：Overlay网络通过封装技术（如VXLAN、GRE等）将数据包包裹在新的封装中，在底层网络上建立虚拟隧道，实现不同物理位置的节点间二层或三层连接。
+- 解耦物理与逻辑：Overlay网络与底层物理网络相互独立，底层负责数据包的传输，Overlay负责网络拓扑和策略的灵活定义。
+- 多租户支持：Overlay网络能支持多个虚拟网络共存，即使它们使用相同的IP地址，也不会冲突，适合云计算和数据中心环境。
+- 灵活路由与多路径：支持多路径转发和动态路由，提升网络带宽利用率和容错能力。
+- 安全隔离：通过加密和虚拟网络划分，保护私有流量的安全传输。
+
+常见协议：
+- VXLAN（Virtual Extensible LAN）：基于UDP封装的二层虚拟网络，利用24位VNI标识不同虚拟网络，广泛应用于数据中心。
+- NVGRE（Network Virtualization using Generic Routing Encapsulation）：基于GRE协议的隧道技术，支持虚拟网络隔离。
+- GRE（Generic Routing Encapsulation）：通用路由封装协议，用于封装各种网络层协议。
+- STT（Stateless Transport Tunneling）：利用TCP头优化网卡特性，提高传输效率。
+
+应用场景：
+- 云数据中心：通过Overlay网络实现不同租户的网络隔离和灵活部署。
+- SD-WAN：利用Overlay网络实现广域网的灵活管理和优化。
+- 容器网络：Kubernetes等容器平台常用Overlay网络（如Flannel、Calico的VXLAN模式）实现Pod间跨主机通信。
+
+L3 网络层引入了 IP 地址，通常标志着应用开发人员关心的网络部分和网络工程师关心的网络部分之间的界限。特别是，应用开发人员通常将 IP 地址视为网络流量的源和目的地，但很少需要理解 L3 路由或网络栈中更低层次的内容，这些通常是网络工程师的领域。IP 地址组通常使用 CIDR 表示法表示，该表示法由一个 IP 地址和 IP 地址上的有效位数组成，中间用斜杠分隔。例如，192.168.27.0/24 表示从 192.168.27.0 到 192.168.27.255 的 256 个 IP 地址组。单个 L2 网络中的 IP 地址组称为子网。在子网内，数据包可以在任意两个设备之间作为单个网络跳转发送，仅基于 L2 头（和尾）。要将数据包发送到单个子网之外，需要 L3 路由，每个 L3 网络设备（路由器）负责根据 L3 路由规则决定数据包的路径。每个作为路由器的网络设备都有路由，确定特定 CIDR 的数据包应发送到的下一跳。例如，在 Linux 系统中，路由 10.48.0.128/26 via 10.0.0.12 dev eth0 表示目的 IP 地址在 10.48.0.128/26 的数据包应通过 eth0 接口路由到下一跳 10.0.0.12。路由可以由管理员静态配置，也可以使用路由协议动态编程。使用路由协议时，每个网络设备通常需要配置，以告知它应与哪些其他网络设备交换路由。然后，路由协议会处理在添加或移除设备或网络链路进出服务时，在整个网络中编程正确的路由。BGP 是推动互联网运行的主要协议之一，因此具有极高的可扩展性，并被现代路由器广泛支持。
+
+网络策略(Network Policy)：网络策略是 Kubernetes 网络的主要工具。用于限制集群中的网络流量。历史上，在企业网络中，网络安全是通过设计网络设备（交换机、路由器、防火墙）的物理拓扑结构及其相关配置来实现的。物理拓扑定义了网络的安全边界。在虚拟化的第一阶段，相同的网络和网络设备结构被虚拟化到云中，并使用相同的技术来创建特定的（虚拟）网络设备拓扑结构，以提供网络安全。添加新应用程序或服务通常需要额外的网络设计，以更新网络拓扑和网络设备配置，以提供所需的安全性。相比之下，Kubernetes 网络模型定义了一个“扁平”网络，其中每个 Pod 都可以使用 Pod IP 地址与集群中的所有其他 Pod 通信。这种方法极大地简化了网络设计，并允许新的工作负载在集群中的任何位置动态调度，而不依赖于网络设计。在这种模型中，网络安全不再由网络拓扑边界定义，而是通过与网络拓扑无关的网络策略来定义。网络策略进一步从网络中抽象出来，使用标签选择器作为其主要机制，用于定义哪些工作负载可以与哪些工作负载通信，而不是使用 IP 地址或 IP 地址范围。虽然你可以（也应该）使用防火墙来限制网络边界的流量（通常称为南北向流量），但它们对 Kubernetes 流量的控制能力通常仅限于整个集群的粒度，而不是特定的 Pod 组，这是由于 Pod 调度和 Pod IP 地址的动态特性。此外，大多数攻击者一旦在边界内获得一个小的立足点，其目标就是横向移动（通常称为东西向）以访问更高价值的目标，而基于边界的防火墙无法防范这种行为。另一方面，网络策略是为 Kubernetes 的动态特性而设计的，它遵循标准的 Kubernetes 范式，使用标签选择器来定义 Pod 组，而不是 IP 地址。由于网络策略在集群内部执行，因此它可以同时控制南北向和东西向流量。网络策略代表了网络安全的重要演进，不仅因为它处理了现代微服务的动态特性，还因为它赋予开发和 DevOps 工程师自行定义网络安全的能力，而不需要学习底层网络细节或向负责管理防火墙的单独团队提交工单。网络策略使得定义意图（例如“只有这个微服务可以连接到数据库”）变得容易，将这种意图编写为代码（通常在 YAML 文件中），并将网络策略的编写集成到 Git 工作流和 CI/CD 流程中。
+
+Kubernetes 网络策略是使用 Kubernetes 的 NetworkPolicy 资源定义的。Kubernates的网络策略的特点：
+- 策略是命名空间范围的。
+- 策略通过标签选择器应用于Pod。
+- 策略规则可以指定Pod、命名空间或CIDR的流量。
+- 策略规则可以指定协议(TCP、UDP、SCTP)、命名端口或端口号。
+
+Kubernetes 本身不执行网络策略，而是将其执行委托给网络插件（CNI）。网络策略的最佳实践：
+- 入站和出站流量(Ingress & egress)：建议每个 Pod 都应该得到网络策略入站规则的保护，这些规则限制连接到 Pod 的流量以及允许的端口。还包括定义网络策略出站规则，这些规则限制 Pod 的出站连接。入站规则保护 Pod 免受来自 Pod 外部的攻击。出站规则有助于在 Pod 被入侵时保护 Pod 外部的所有内容，减少攻击面，防止攻击者横向移动（东西向）或将受损数据从集群中窃取（南北向）。
+- 策略模式：由于网络策略和标签的灵活性，通常有多种标签和编写策略的方式来实现这一目标。一种最常见的方法是定义少量适用于所有 Pod 的全局策略，然后为每个 Pod 定义一个特定的策略，该策略定义了所有特定于该 Pod 的入站和出站规则。
+```yaml
+kind: NetworkPolicy
+apiVersion: networking.k8s.io/v1
+metadata:
+  name: front-end
+  namespace: staging
+spec:
+  podSelector:
+    matchLabels:
+      app: back-end
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: front-end
+      ports:
+        - protocol: TCP
+          port: 443
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: database
+      ports:
+        - protocol: TCP
+          port: 27017
+```
+- 默认拒绝(Default Deny)策略：定义默认拒绝的网络策略。每当部署一个新的 Pod 时，会为该Pod自动定义一个默认拒绝策略。并且可以包含一些对默认拒绝的例外（例如，允许 Pod 访问 DNS）。
+```yaml
+# 定义一个默认拒绝策略（kube-dns/core-dns的DNS查询除外）
+
+apiVersion: projectcalico.org/v3
+kind: GlobalNetworkPolicy
+metadata:
+  name: default-app-policy
+spec:
+  namespaceSelector: has(projectcalico.org/name) && projectcalico.org/name not in {"kube-system", "calico-system", "calico-apiserver"}
+  types:
+    - Ingress
+    - Egress
+  egress:
+    - action: Allow
+      protocol: UDP
+      destination:
+        selector: k8s-app == "kube-dns"
+        ports:
+          - 53
+```
+- 分层策略：通过角色来分层定义网络策略。
+
+Kubernetes Ingress：Kubernates Ingress是基于Kubernates Services，提供应用层的负载均衡，将特定域名或URL的HTTP和HTTPS请求映射到Kubernates Services，Ingress还可以用于在负载均衡到服务之前终止SSL/TLS。Ingress的实现细节取决于如何使用Ingress Controller，Ingress Controller负责监控Kubernates Ingress资源，并配置一个或多个Ingress负载均衡器来实现应用的负载均衡，常见的 Ingress Controller 包括 NGINX Ingress Controller、Traefik、HAProxy等。与处理网络层(L3-4)的Kubernates Services不同，Ingress负载均衡器在应用层(L5-7)使用，请求通过负载均衡器与选定的服务后端 Pod 之间的单独连接进行转发。Kubernates Ingress 可以将外部流量分发到集群内的多个服务实例，从而实现负载均衡。Kubernates Ingress 支持基于域名、URL 路径等多种路由规则，可以灵活地将流量路由到不同的服务。Kubernates Ingress 可以在负载均衡之前终止 SSL/TLS 连接，简化证书管理。通过 Kubernates Ingress，可以将多个服务暴露在同一个外部 IP 地址下，简化客户端配置。
+- 集群内 Ingress：集群内 Ingress 是指在 Kubernetes 集群内部的 Pod 中执行 Ingress 负载均衡。在这种情况下，负载均衡器作为集群内的一个或多个 Pod 运行，处理进入集群的流量并将其路由到相应的服务。适用于需要高度灵活性和自定义配置的场景，特别是在私有云或本地数据中心环境中。
+- 外部 Ingress：外部 Ingress 是指在 Kubernetes 集群外部实现 Ingress 负载均衡。在这种情况下，负载均衡由集群外部的设备或云服务提供商的功能来实现。这些外部设备或服务负责处理进入集群的流量，并将其路由到集群内的相应服务。适用于希望减少集群内资源消耗、利用云服务提供商功能的场景，特别是在公有云环境中。
+
+Kubernates Egress：用来描述Pod到集群外部任何目标的连接，与Kubernetes Ingress不同，Kubernates提供了Ingress资源来管理流量，但没有Kubernates Ingress资源。Kubernates Egress在网络层的处理方式取决于集群使用的Kubernates网络实现（CNI插件）。如果使用服务网格(Service Mesh)，它可以在Kubernates网络实现(CNI插件)的基础上增加出站功能。对于Kubernetes Ingress可以有是那种选择方式：
+- 限制出站流量：控制哪些Pod可以连接到集群外部的设备。通过使用网络策略（Network Policy）为每个微服务定义出站规则来实现的，往往与一个默认拒绝策略结合使用，该策略确保在定义允许特定流量的策略之前，默认拒绝所有出站流量。使用 Kubernetes 网络策略限制对特定外部资源的访问时，一个限制是外部资源需要在策略规则中指定为 IP 地址（或 IP 地址范围）。如果与外部资源关联的 IP 地址发生变化，则每个引用这些 IP 地址的策略都需要更新为新的 IP 地址。
+- 出站NAT：出站流量如何进行网络地址转换（NAT），如何处理源IP地址。网络地址转换（NAT）是将数据包中的 IP 地址映射到另一个 IP 地址的过程，数据包在通过执行 NAT 的设备时进行这一操作。根据使用场景的不同，NAT 可以应用于源 IP 地址或目标 IP 地址，或者同时应用于两者。如果覆盖网络中的 Pod 尝试连接到集群外部的 IP 地址，则托管该 Pod 的节点会使用 SNAT（源网络地址转换）将数据包的不可路由源 IP 地址映射到节点的 IP 地址，然后转发数据包。节点随后将反向传入的响应数据包映射回原始的 Pod IP 地址，因此数据包在两个方向上都能端到端流动，而 Pod 和外部服务都不会意识到这种映射的存在。
+- 出站网关：使用专门的网关来管理出站流量，提供额外的安全性和可见性。过一个或多个出站网关路由所有出站连接。网关对流量进行 SNAT（源网络地址转换），因此外部服务会看到连接来自出站网关。主要用例是提高安全性，要么通过出站网关直接执行安全角色，控制允许的流量，要么与边界防火墙（或其他外部实体）结合使用。例如，使边界防火墙看到流量来自已知的 IP 地址（出站网关），而不是来自它们不理解的动态 Pod IP 地址。
+
+Kubernates Services：提供了一种对一组Pod的访问抽象为网络服务的方法。支持每个服务的Pod组通常使用标签选择器定义。当客户端连接到Kubernates Services服务时流量会被负载均衡到支持该服务的其中一个Pod上，Kubernates Services主要有3种类型：
+- ClusterIP：这是从集群内部访问服务的常用方式。默认的服务类型是 ClusterIP。这种类型允许服务在集群内部通过一个称为服务 Cluster IP 的虚拟 IP 地址进行访问。服务的 Cluster IP 可以通过 Kubernetes DNS 发现。例如，my-svc.my-namespace.svc.cluster-domain.example。在典型的 Kubernetes 部署中，每个节点上都运行着 kube-proxy，它负责拦截到 Cluster IP 地址的流量，并在支持每个服务的 Pod 组之间进行负载均衡。在此过程中，使用 DNAT（目标网络地址转换）将目标 IP 地址从 Cluster IP 映射到选定的Pod。响应数据包在返回到发起流量的 Pod 时，会进行反向 NAT。重要的是，网络策略是基于 Pod 而不是Kubernates Services的 Cluster IP 来执行。（即，出站网络策略在 DNAT 将连接的目标 IP 更改为选定的服务 Pod 之后，对客户端 Pod 执行。由于流量的目标 IP 是唯一更改的部分，入站网络策略对 Pod 来说，原始客户端 Pod 是流量的源。）
+- Node Port：这是从集群外部访问服务的常用方式。访问集群外部服务的最基本方式是使用 NodePort 类型的服务。NodePort 是在集群中每个节点上预留的一个端口，通过该端口可以访问服务。在典型的 Kubernetes 部署中，kube-proxy 负责拦截到 NodePort 的连接，并在支持每个服务的 Pod 之间进行负载均衡。访问集群外部服务的最基本方式是使用 NodePort 类型的服务。NodePort 是在集群中每个节点上预留的一个端口，通过该端口可以访问服务。在典型的 Kubernetes 部署中，kube-proxy 负责拦截到 NodePort 的流量，并在支持每个服务的 Pod 之间进行负载均衡。在此过程中，使用 NAT（网络地址转换）将目标 IP 地址和端口从节点 IP 和 NodePort 映射到选定的 Pod 和服务端口。此外，源 IP 地址从客户端 IP 映射到节点 IP，以便连接上的响应数据包通过原始节点返回，在那里可以反向 NAT。（执行 NAT 的节点拥有反向 NAT 所需的连接跟踪状态。）请注意，由于连接的源 IP 地址被 SNAT（源网络地址转换）为节点 IP 地址，服务支持 Pod 的入站网络策略无法看到原始客户端 IP 地址。这通常意味着任何此类策略仅限于限制目标协议和端口，而无法基于客户端/源 IP 进行限制。在某些场景中，可以通过使用 externalTrafficPolicy来规避这一限制，从而保留源 IP 地址。
+- LoadBalancer：这是使用外部负载均衡器，作为一种更复杂的从集群外部访问服务方式。LoadBalancer 类型的服务通过外部网络负载均衡器（NLB）暴露服务。具体的网络负载均衡器类型取决于你使用的公有云提供商，或者在本地部署时，取决于与你的集群集成的特定硬件负载均衡器。服务可以通过网络负载均衡器上的特定 IP 地址从集群外部访问，默认情况下，负载均衡器会通过服务的 NodePort 在节点之间进行负载均衡。请注意，由于连接的源 IP 地址被 SNAT（源网络地址转换）为节点 IP 地址，服务支持 Pod 的入站网络策略无法看到原始客户端 IP 地址。这通常意味着任何此类策略仅限于限制目标协议和端口，而无法基于客户端/源 IP 进行限制。在某些场景中，可以通过使用 externalTrafficPolicy来规避这一限制，从而保留源 IP 地址。
+
+广播服务IP(Advertising service IPs)：使用节点端口或网络负载均衡器的替代方法是通过 BGP 广播服务 IP 地址。这需要集群运行在支持 BGP 的底层网络上，通常意味着使用标准的顶部机架（Top of Rack）路由器进行本地部署。通过这种方式，可以在支持 BGP 的网络环境中灵活地广播服务 IP，从而实现更高效的流量管理和负载均衡。
+
+externalTrafficPolicy: local：默认情况下，无论使用 NodePort 类型、LoadBalancer 类型的服务，还是通过 BGP 广播服务 IP 地址，从集群外部访问服务时，流量会在所有支持该服务的 Pod 之间均匀地进行负载均衡，而不考虑这些 Pod 所在的节点。可以通过将服务配置为 externalTrafficPolicy: local 来改变这种行为，这指定了流量应仅在本地节点上支持该服务的 Pod 之间进行负载均衡。当与 LoadBalancer 类型的服务或 Calico 服务 IP 地址广播结合使用时，流量仅会被引导到至少托管一个支持该服务的 Pod 的节点。这减少了节点之间的潜在额外网络跳转，更重要的是，可以保留源 IP 地址一直到 Pod，以便网络策略可以限制特定的外部客户端（如果需要）。需要注意的是，对于 LoadBalancer 类型的服务，并非所有负载均衡器都支持这种模式。在服务 IP 广播的情况下，负载均衡的均匀性取决于拓扑结构。在这种情况下，可以使用 Pod 反亲和性规则来确保支持 Pod 在拓扑结构中的均匀分布，但这会增加部署服务的复杂性。通过这种方式，externalTrafficPolicy: local 提供了一种更高效和灵活的方式来管理和控制外部流量的负载均衡，同时保留源 IP 地址以便更精细的网络策略控制。
+
+##### eBPF
+
+eBPF是Linux的一项功能，允许快速且安全的将程序加载到内核中，以自定义其操作。eBPF是嵌入在Linux内核中的一种虚拟机。它允许将程序加载到内核当中，并附加到钩子(hook)上，这些钩子在某些事件发生时被触发，这使得可以自定义内核的行为，虽然每种类型的钩子都使用相同的eBPF虚拟机，但钩子的功能却差异很大。将程序加载到内核当中很可能是危险的，内核会通过一个非常严格的内核验证器运行加载的所有程序，验证器会对程序进行沙盒化。确保只能访问允许访问的内存部分，并且确保它快速终止。eBPF 代表“**扩展的伯克利包过滤器**”（extended Berkeley Packet Filter），伯克利包过滤器是一种早期的虚拟机，专门用于过滤数据包。例如，tcpdump 等工具使用这种“经典”的 BPF 虚拟机来选择应发送到用户空间进行分析的数据包，eBPF 是 BPF 的大幅扩展版本，适用于内核中的通用用途。虽然名称保留了下来，但eBPF可以用于很多用途。
+
+eBPF的程序类型，eBPF 程序的功能在很大程度上取决于它所附加的钩子：
+- 跟踪程序：可以附加到内核中的大量函数上，跟踪程序对于收集统计数据和深入调试内核非常有用。大多数跟踪钩子只允许对函数处理的数据进行只读访问，但有些允许修改数据。
+- 流量控制(tc)程序：可以附加到给定网络设备的入口和出口，内核为每个数据包执行一次程序。由于这些钩子用于数据包处理，内核允许程序修改或扩展数据包、丢弃数据包、标记数据包以进行排队，或将数据包重定向到另一个接口。
+- XDP(eXpress Data Path)：它是是 eBPF 钩子的名称，每个网络设备都有一个XDP入口钩子，它在内核为数据包分配套接字缓冲区之前，为每个传入的数据包触发一次。XDP可以为DoS保护和入口负载均衡等场景提供卓越的性能。XDP的缺点是需要网络驱动程序的支持才能获得良好的性能。XDP本身不足以实现Kubernates Pod网络所需的所有逻辑，但XDP和流量控制钩子的组合效果很好。
+- 套接字程序：允许eBPF程序更改新创建套接字的目标IP或强制套接字绑定到正确的源IP地址。
+- 安全相关钩子：允许以各种方式对程序行为进行策略控制。例如，seccomp 钩子允许以细粒度的方式对系统调用进行策略控制。
+
+内核通过“辅助函数”暴露每个钩子的功能。例如，tc 钩子有一个辅助函数来调整数据包大小，但该辅助函数在跟踪钩子中是不可用的。使用 eBPF 的一个挑战是不同的内核版本支持不同的辅助函数，缺乏某个辅助函数可能使得无法实现特定功能。附加到 eBPF 钩子的程序能够访问 BPF “maps”。BPF maps 有两个主要用途：允许 BPF 程序存储和检索长期存在的数据。允许 BPF 程序与用户态程序之间进行通信。BPF 程序可以读取用户态写入的数据，反之亦然。
+
+##### Kubernetes Resources
+
+为命名空间设置默认内存请求和限制：如果你的命名空间设置了内存”资源配额“（资源配额提供了限制每个命名空间的资源消耗总和的约束），那么为内存限制设置一个默认值会很有帮助。以下是内存资源配额对命名空间施加的三条限制：
+- 命名空间中运行的每个Pod中的容器都必须有内存限制（如果Pod中的每个容器声明了内存限制，Kubernates可以通过将其容器的内存限制相加推断出Pod级别的内存限制）。
+- 内存限制用于在Pod被调度到的节点上执行资源预留。预留给命名空间中所有Pod使用的内存总量不能超过规定的限制。
+- 命名空间中所有Pod实际使用的内存总量也不能超过规定的限制。
+
+如果该命名空间中的任何Pod的容器未指定内存限制，控制面将默认内存限制应用于该容器，这样Pod可以在受到内存资源配额(ResourceQuota)限制的命名空间中运行。
+
+为命名空间设置默认的CPU请求和限制：一个Kubernates集群可以划分为多个命名空间。如果你在具有默认CPU限制的命名空间内创建一个Pod，并且这个Pod中所有容器都没有声明自己的CPU限制，那么控制面会为容器设定默认的CPU限制。如果命名空间设置了资源配额，为CPU限制设置一个默认值会很有帮助。以下是CPU资源配额对命名空间施加的两条限制：
+- 命名空间中运行的每个Pod中的容器都必须有CPU限制。
+- CPU限制用于在Pod被调度到的节点上执行资源预留。
+
+预留给命名空间中所有的Pod使用的CPU总量不能超过规定的限制。如果该命名空间中的任何 Pod 的容器未指定 CPU 限制， 控制面将默认 CPU 限制应用于该容器， 这样 Pod 可以在受到 CPU 资源配额限制的命名空间中运行。
+
+配置命名空间的最小和最大内存约束：为命名空间定义一个有效的内存资源限制范围，在该命名空间中每个新创建 Pod 的内存资源是在设置的范围内。
+
+为命名空间配置内存和 CPU 配额：
+- 在该命名空间中的每个 Pod 的所有容器都必须要有内存请求和限制，以及 CPU 请求和限制。
+- 在该命名空间中所有 Pod 的内存请求总和不能超过命名空间的内存请求。
+- 在该命名空间中所有 Pod 的内存限制总和不能超过命名空间的内存限制。
+- 在该命名空间中所有 Pod 的 CPU 请求总和不能超过命名空间的CPU请求。
+- 在该命名空间中所有 Pod 的 CPU 限制总和不能超过该命名空间的CPU限制。
+
+k8s 更改 CPU 管理器策略：在Kubernates中，更改CPU管理策略主要通过修改kubelet的配置参数 --cpu-manager-policy 或Kubelet或KubeletConfiguration的cpuManagerPolicy字段来实现。CPU管理支持两种策略：
+- none：默认策略，不启用特殊的CPU亲和性管理，使用CFS配额限制CPU。
+- static：为节点上符合条件的Guaranteed Pod提供CPU独占和亲和性，减少CPU迁移和上下文切换，提高性能。
+
+更改 CPU 管理器策略的步骤：由于CPU管理策略只能在kubelet生成新的Pod时生效，简单的更改配置不会影响现有Pod：
+- 腾空节点：将节点上所有Pod停止，确保节点空闲。
+- 停止kubelet服务：在节点上停止kubelet避免配置冲突。
+- 删除旧的CPU管理器状态文件：默认路径为/var/lib/kubelet/cpu_manager_state。删除该文件可以清除旧策略的状态，避免与新策略冲突。
+- 修改kubelet配置：通过编辑kubelet文件（如 ConfigMap 或 kubelet 启动参数）将cpuManagerPolicy设置为所需策略（如static）。
+- 重启kubelet服务：启动kubelet，使新配置生效。重复以上步骤对每个节点进行操作。
+
+参数说明：--cpu-manager-policy：指定 CPU 管理策略，支持 none 和 static。--cpu-manager-reconcile-period：CPU 管理器状态同步频率，默认与节点状态更新频率相同。--cpu-manager-policy-options：用于微调 static 策略的行为，需开启相关特性门控。通过以上步骤，可以安全地将 CPU 管理器策略从 none 切换到 static，实现更精细的 CPU 绑定和管理，从而提升对 CPU 亲和性敏感工作负载的性能表现。
+
+拓扑管理器(Topology Manager)：是kubelet的一个组件，旨在协调CPU、内存和设备管理等多个资源管理组件，使资源分配能够考虑节点的硬件拓扑结构，以优化性能并减少延迟。在启用拓扑管理器(Topology Manager)之前，Kubernates中的CPU管理器和设备管理器等组件独立做资源分配，，可能导致CPU和设备分配在不同的NUMA节点，增加跨节点访问的延迟，影响性能。拓扑管理器(Topology Manager)作为”事实来源“，收集各Hint Provider（提示提供者）发来的拓扑信息，统一协调资源分配，使Pod的CPU、内存和设备资源尽可能在同一或相邻的NUMA节点上分配，从而提升性能。工作原理：
+- 拓扑管理器(Topology Manager)接收Hint Providers发送的NUMA节点位掩码和首选分配信息。
+- 根据配置的策略，对提示进行处理，选出最优的拓扑分配方案。
+- 根据选定的提示，决定是否接收或拒绝Pod在该节点上运行。
+- 选定的提示会存储起来，供 Hint Providers在后续资源分配时参考。
+
+支持的拓扑管理策略(Topology Manager Policies)，拓扑管理器(Topology Manager)提供了四种策略，通过kubelet参数--topology-manager-policy配置：
+- none（默认）：不进行任何拓扑对齐，资源分配不考虑NUMA拓扑，Pod不拒绝。
+- best-effort：收集Hint Providers的拓扑信息，尝试对齐资源，但如果无法满足首选拓扑，仍然允许Pod调度，Pod不拒绝。
+- restricted：只有当所有资源都满足首选拓扑时才允许Pod调度，否则拒绝Pod。Pod 进入 Terminated 状态，调度失败。
+- single-numa-node：资源必须全部分配在同一个NUMA节点上，否则拒绝Pod。Pod 进入 Terminated 状态，调度失败。
+- prefer-closest-numa-nodes（额外需开启 TopologyManagerPolicyOptions 功能门控）：优先选择距离更近的 NUMA 节点，减少跨节点访问延迟（Kubernetes 1.32 及以后默认可用）。
+- max-allowable-numa-nodes（额外需开启 TopologyManagerPolicyOptions 功能门控）：限制允许的最大 NUMA 节点数，避免过多 NUMA 跨越带来的性能损失。
+
+其中，restricted 和 single-numa-node 策略对性能要求较高的应用更友好，因为它们严格保证了资源的 NUMA 本地性。启用条件：节点必须启用CPU管理器的static策略。Pod需要是Guaranteed QoS类别，确保资源请求严格匹配。kubelet需要开启拓扑管理器(Topology Manager)功能（Kubernetes 1.18 及以后默认开启）。综上，拓扑管理器(Topology Manager)通过协调CPU、设备和内存管理器的拓扑提示，给予配置的策略，在节点层面实现资源的NUMA本地性对齐，提升性能和降低延迟，尤其适合对延迟和吞吐有严格要求的高性能计算、机器学习、金融服务等场景。
+
+NUMA（Non-Uniform Memory Access，非一致内存访问）是一种用于多处理器系统的内存架构，旨在解决传统 SMP（对称多处理器）架构中，因所有处理器共享同一内存总线而导致的性能瓶颈问题。NUMA 架构的关键概念：
+- 节点(Node)：NUMA架构将系统划分为多个节点，每个节点包含一个或多个处理器，本地内存和I/O设备，节点在物理上彼此独立，并通过高速互联网络连接在一起，形成一个整体系统。
+- 本地内存和远程内存：处理器可以快速访问其所在节点的本地内存，而访问其他节点的远程内存则会有延迟，访问本地节点的速度最快，访问远端节点的速度最慢，访问速度与节点距离有关。
+- 节点距离(Node Distance)：用于衡量CPU访问不同节点内存的速度差异，距离越远访问速度越慢。
+
+NUMA优势：解决内存访问瓶颈，通过将内存分配到各个节点，使处理器优先访问本地内存，降低了内存访问延迟，提高了多处理器系统的性能。提高系统的扩展性，NUMA架构简化了总线的设计，可以支持更多的处理器，提高系统的扩展性。NUMA 架构通过将 CPU 分组到不同的节点，并为每个节点配置本地内存，使得 CPU 优先访问本地内存，从而降低内存访问延迟，提高系统整体性能. 在 Kubernetes 等云原生环境中，NUMA 亲和性调度等技术可以被用来优化任务调度和内存分配策略，进一步提高内存访问效率和整体性能。
+
+Kubernates自定义 DNS 服务：主要是指在集群内部配置和管理DNS解析服务，以满足集群内Pod和Service的名称解析需求，同时支持对特定域名使用自定义的DNS服务器进行解析。Kubernetes 集群内置 DNS 服务用于实现服务发现，允许 Pod 通过服务名访问其他服务，而不必使用 IP 地址。CoreDNS以Deployment形式运行，通常暴漏为Kubernates服务（服务名为 kube-dns），Pod通过kubelet的--cluster-dns参数配置使用该DNS服务。DNS 服务支持正向查找（A、AAAA 记录）、SRV 记录、PTR 记录等多种查询类型。自定义DNS服务满足集群内部对特定域名的解析需求，例如某些域名请求转发到自建的DNS服务器。支持集群外部域名解析的定制，比如使用特定的上游DNS服务器（如 Google DNS）。允许Pod使用自定义的DNS配置，覆盖默认的集群DNS设置。自定义DNS配置方式：CoreDNS 的配置通过 ConfigMap 管理，管理员可以在 ConfigMap 中添加自定义的 DNS 解析规则。例如，可以为特定域名（如 a.test.com）配置专门的 DNS 服务器：
+```json
+a.test.com:53 {
+  errors
+  cache 30
+  forward . 10.10.10.1
+}
+```
+Pod 级别的自定义 DNS 配置：Kubernetes 允许在 Pod 规范中通过 dnsPolicy 和 dnsConfig 字段自定义 DNS 行为。常用的 dnsPolicy 有：ClusterFirst（默认）-优先使用集群 DNS；Default -继承宿主机的 DNS 配置；None -忽略默认 DNS，完全使用自定义的 dnsConfig 配置。通过 dnsConfig 可以指定：nameservers -自定义 DNS 服务器 IP 列表（最多3个）；searches -DNS 搜索域列表。options -DNS 选项，如 ndots 等。
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dns-example
+spec:
+  containers:
+  - name: test
+    image: nginx
+  dnsPolicy: "None"
+  dnsConfig:
+    nameservers:
+    - 192.0.2.1
+    searches:
+    - ns1.svc.cluster-domain.example
+    - my.dns.search.suffix
+    options:
+    - name: ndots
+      value: "2"
+    - name: edns0
+```
+该 Pod 内部的 /etc/resolv.conf 会包含上述自定义的 DNS 配置。DNS查询流程：
+- Pod 发起 DNS 查询后，默认会先查询 CoreDNS缓存。
+- 如果查询的域名匹配集群域名后缀（如 .cluster.local），由 CoreDNS 直接解析。
+- 如果查询匹配自定义存根域，则转发到对应的自定义 DNS 服务器。
+- 其他查询则转发到上游 DNS 服务器（如 Google DNS）。
+
+k8s 的自定义 DNS 服务主要通过配置CoreDNS的ConfigMap来实现对特定域名的定制解析，同时支持 Pod 级别的 DNS 策略和配置，满足灵活多样的 DNS 解析需求，保障集群内外服务的顺畅访问和集成。
+
+Kubernetes NetworkPolicy是一种用于控制Pod与其它网络实体之间通信的资源对象，主要目的是实现基于标签选择器的网络访问控制，增强集群的安全性和隔离性。NetworkPolicy以Pod为中心，通过标签选择器（PodSelector）选择一组Pod定义允许哪些流量可以进入(Ingress)或离开(Egress)这些Pod。工作在网络层(L3/L4)，控制IP地址和端口的访问权限，不涉及应用层协议。NetworkPolicy需要底层网络插件支持，如Flannel、Calico、Cilium、Weave Net等，否则策略不会生效。如果没有任何NetworkPolicy，Pod之间的网络通信默认是允许的，一旦在命名空间中创建了NetworkPolicy，只有明确允许的流量才会被放行。PodSelector(选择受策略约束的Pod)、PolicyType（定义策略类型，常见有Ingress -入站流量控制、Egress -出站流量控制，可以单独或同时使用），定义允许的来源（Ingress）和目的地（Egress），可以通过以下三种方式指定：podSelector -选择特定标签的 Pod；namespaceSelector -选择特定标签的命名空间内的Pod；ipBlock -指定允许或拒绝的IP网段（CIDR），端口和协议：可以指定允许访问的端口号和协议（TCP、UDP、SCTP）。NetworkPolicy声明示例：
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: example-network-policy
+  namespace: default
+spec:
+  podSelector:
+    matchLabels:
+      role: db
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - ipBlock:
+        cidr: 172.17.0.0/16
+        except:
+        - 172.17.1.0/24
+    - namespaceSelector:
+        matchLabels:
+          project: myproject
+    - podSelector:
+        matchLabels:
+          role: frontend
+    ports:
+    - protocol: TCP
+      port: 6379
+  egress:
+  - to:
+    - ipBlock:
+        cidr: 10.0.0.0/24
+    ports:
+    - protocol: TCP
+      port: 5978
+```
+该策略表示：作用于 default 命名空间中带有role=db标签的Pod。允许来自指定 IP 段（排除部分网段）、特定命名空间和特定标签Pod的入站访问，且只允许 TCP 6379 端口。允许这些 Pod 访问指定 IP 段的 TCP 5978 端口。应用场景：限制服务A的Pod不能访问服务B的Pod。不同租户命名空间之间实现网络隔离。对暴露到外部的Pod实现白名单访问。限制Pod只能访问指定端口或指定来源。NetworkPolicy只影响被选中Pod的网络流量。Pod 默认可以访问节点和集群 DNS 等基础设施，除非特别限制。多个 NetworkPolicy 规则是“或”关系，满足任一规则即可放行流量。需要确保所用的网络插件支持 NetworkPolicy 功能。Kubernetes 的 NetworkPolicy 是一种强大的网络访问控制机制，通过声明式的 YAML 配置，结合标签选择器和 IP 范围，实现对 Pod 网络流量的细粒度管理，提升集群安全性和网络隔离能力。
+
+Kubernates云控制器管理器(Cloud Controller Manager，简称CCM)旨在将集群连接到云供应商的应用程序编程接口(API)，并将与云平台交互的组件分离开来。由于云驱动的开发和发布与Kubernates项目本身步调不同，将特定于云环境的代码抽象到云控制管理器，当服务类型设定为Type=LoadBalancer时，云控制器管理器(CCM)会为该服务创建配置传统型负载均衡(CLB)或网络型负载均衡(NLB)，包括CLB、NLB、监听、后端服务器组等资源。当服务对应的后端Endpoint或者集群节点发生变化时，云控制器管理器(CCM)会自动更新CLB或NLB的后端虚拟服务组。当集群网络组件为Flannel时，云控制器管理器(CCM)组件负责打通容器与节点的网络，实现容器跨节点通信。云控制器管理器(CCM)会将节点的Pod网段信息写入到VPC的路由表中，从而实现跨节点的网络通信。该功能无需配置，安装即可使用。开发云控制器管理器(CCM)有两种方式：
+- 树外(Out of Tree)：使用满足cloudprovider.Interface接口的实现来创建一个GO语言包，使用来自Kubernates核心代码库cloud-controller-manager中的main.go作为模版，在main.go中导入云包，确保包有一个init块来运行cloudprovider.RegisterCloudProvider。
+- 树内(In Tree)：对于树内驱动，可以将树内云控制器管理器(CCM)作为集群中的DaemonSet来运行。
+
+静态数据加密：是指数据写入存储介质(ETCD)时进行加密，确保数据在磁盘上是加密状态，即使存储介质被非法访问，数据也无法被直接读取。Kubernates支持对API资源数据进行加密，最常见的是对Secret资源进行加密，除了Secret，也可以配置其他资源类型（如自定义资源），但需要集群版本支持。Kubernates API Server通过启动参数 --encryption-provider-config指定一个加密配置文件，改配置文件定义了加密策略和秘钥，常用的加密方式包括：AES-CBC、AES-GCM、KMS v1、KMS v2等。当有数据写入ETCD时，API Server根据配置对数据进行加密，读取时自动解密，保证数据在ETCD中是加密存储的。配置步骤：
+- 生成加密密钥：通常生成一个32字节的随机密钥，并进行base64编码。
+- 编写加密配置文件：YAML格式，指定资源类型（如secrets）和加密提供者（如aescbc）及密钥。
+- 修改API Server启动参数：添加--encryption-provider-config指向配置文件路径。
+- 重启API Server：使配置生效。
+- 验证加密效果：通过etcdctl命令查看存储的Secret是否为加密格式，且通过kubectl命令能正常读取解密后的数据。
+
+Kubernetes静态数据加密通过配置API Server加密提供者，实现对Secret等敏感资源在etcd中的加密存储，防止数据泄露，增强集群安全性。配置过程包括生成密钥、编写加密配置、修改API Server参数及重启等步骤，且需要对已有数据进行迁移加密。此功能是保护Kubernetes集群中敏感信息的重要安全措施。
+
+Kubernetes中的“关键附加组件Pod的保证调度”机制主要目的是确保那些对集群正常运行至关重要的附加组件Pod能够被优先调度和持续运行，避免因资源紧张或节点变动导致它们被驱逐后无法及时恢复，从而保证集群的稳定性和功能完整性。Kubernetes核心组件（如API服务器、调度器、控制器管理器）通常运行在控制平面节点上。但某些关键附加组件（如metrics-server、DNS、UI等）必须运行在普通的集群节点上。如果这些关键附加组件Pod被驱逐（无论是手动驱逐还是升级等操作的副作用），且无法及时重新调度，集群功能可能会受到严重影响甚至停止工作。如何标记Pod为关键（Critical）：
+- 关键Pod必须运行在kube-system命名空间（该命名空间可通过参数配置）。
+- 需要为Pod设置priorityClassName，值为system-cluster-critical或system-node-critical，其中system-node-critical优先级最高，甚至高于system-cluster-critical。
+- 关键Pod还需带有CriticalAddonsOnly的toleration，以配合调度器的保证调度机制。
+
+保证调度的实现机制：当集群资源紧张，调度器发现没有节点有足够资源调度关键Pod时，Rescheduler组件会介入。Rescheduler尝试通过驱逐一些非关键的Pod来释放资源，为关键Pod腾出空间。在驱逐过程中，为避免其他Pod抢占腾出的资源，目标节点会临时添加一个名为CriticalAddonsOnly的污点（taint），只有带有对应容忍（toleration）的关键Pod才能被调度到该节点。一旦关键Pod成功调度，该污点会被移除。标记为关键的Pod并非绝对不可被驱逐，静态Pod标记为关键时无法被驱逐，但非静态Pod即使被驱逐也会被重新调度，保证不会永久不可用。当前Rescheduler没有保证选择哪个节点以及驱逐哪些Pod，因此启用该机制时，普通Pod可能会被偶尔驱逐以保证关键Pod调度。Rescheduler默认作为静态Pod启用，可以通过修改启动参数或删除其manifest文件来禁用。
+
+Kubernetes的关键附加组件Pod保证调度机制通过优先级（priorityClassName）和调度器的资源调度策略，结合Rescheduler的驱逐释放资源策略，确保关键附加组件Pod在资源紧张时依然能被优先调度和保持运行，保障集群的核心功能稳定性和可用性。将关键Pod标记为system-cluster-critical或system-node-critical优先级。关键Pod运行在kube-system命名空间。使用Rescheduler驱逐非关键Pod释放资源。通过CriticalAddonsOnly污点和容忍机制保护关键Pod调度空间。这样设计有效避免了关键附加组件因资源竞争而长时间不可用的风险，是Kubernetes集群稳定运行的重要保障机制。
+
+Kubernates中的IP伪装代理(ip-masq-agent)是一个DaemonSet形式部署在每个节点上的代理程序，主要用于管理节点上的IP伪装规则，确保容器流量在发送到集群外部地址时使用节点的IP地址作为源地址，而非Pod的IP地址，从而满足某些网络环境对流量源地址的要求。IP伪装(Masquerade)：通过配置iptables规则，将Pod发往集群节点之外的流量源IP地址伪装成节点IP隐藏Pod的真实IP，保证流量能被外部网络接收。非伪装CIDR范围：默认情况下，ip-masq-agent将RFC 1918定义的三大私有IP段（10.0.0.0/8、172.16.0.0/12、192.168.0.0/16）和链路本地地址段（169.254.0.0/16）视为非伪装范围，即这部分流量不会被伪装。iptables链：代理创建一个名为IP-MASQ-AGENT的iptables链，并在POSTROUTING链中跳转到该链，判断流量是否需要伪装。配置自动重载：ip-masq-agent会每隔默认60秒（可配置）从/etc/config/ip-masq-agent配置文件重新加载规则，实现动态更新。部署与配置：
+- 部署方式：通过kubectl应用官方提供的DaemonSet YAML文件部署ip-masq-agent。
+- 节点标签：需要给希望运行ip-masq-agent的节点打标签（如node.kubernetes.io/masq-agent-ds-ready=true），使DaemonSet只在指定节点运行。
+- 配置文件：配置文件支持YAML或JSON格式，主要包含以下可选字段：nonMasqueradeCIDRs：指定不需要伪装的IP地址范围列表。masqLinkLocal：是否对链路本地地址段进行伪装，默认开启（true）。resyncInterval：配置文件重新加载间隔时间，支持秒（s）或毫秒（ms）。
+- 自定义配置：通过创建ConfigMap并挂载到ip-masq-agent容器，实现对默认伪装规则的定制，比如只对特定IP段进行伪装。
+
+使用场景：在某些云环境中，外部流量必须来自于节点的IP地址，Pod的地址直接访问会被拒绝，此时需要ip-masq-agent进行伪装。集群内Pod访问集群外服务时，确保流量原地址为节点IP，满足安全和网络策略的要求。控制哪些IP范围流量需要伪装，避免不必要的SNAT，提升网络性能和可控性。
+
+Kubernates中闲置存储资源消耗(Limit Storage Consumption)主要有两种机制来实现：LimitRange、ResourceQuota，它们可以帮助集群管理员来控制单个Pod或命名空间的存储请求和实际使用量，防止存储资源被过度占用，保障集群稳定运行。
+- LimitRange（限制范围）：在命名空间级别定义Pod或容器的资源请求和限制的默认值和最大值，包括存储资源（如临时存储ephemeral-storage）。限制单个容器或Pod请求的存储资源大小，防止用户请求资源过大导致浪费。可以设置默认请求和限制，避免用户忘记设置资源限制。
+```yaml
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: storage-limit-range
+  namespace: example-namespace
+spec:
+  limits:
+  - type: Container
+    max:
+      ephemeral-storage: "2Gi"
+    min:
+      ephemeral-storage: "100Mi"
+    default:
+      ephemeral-storage: "500Mi"
+    defaultRequest:
+      ephemeral-storage: "200Mi"
+```
+以上配置限制单个容器的临时存储最大为2Gi，最小为100Mi，默认请求为200Mi，默认限制为500Mi。
+- ResourceQuota（资源配额）：对命名空间中的所有资源的总消耗设置上限，包括存储资源的从请求量和使用量。限制整个命名空间中持久卷声明(PVC)请求的存储总量。限制临时存储的总请求量。防止整个名空间无限制的创建大量存储资源。导致集群资源枯竭。
+```yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: storage-quota
+  namespace: example-namespace
+spec:
+  hard:
+    requests.storage: "10Gi"
+    persistentvolumeclaims: "5"
+```
+以上配置限制该命名空间中所有PVC请求的存储总和不超过10Gi，PVC数量不超过5个。
+- 结合使用：LimitRange控制单个Pod/容器的存储请求和限制，ResourceQuota控制命名空间整体的存储资源消耗。通过两者结合，既防止单个应用消耗过多存储，也防止整个命名空间超出资源预算。
+
+Kubernates支持对临时存储(ephemeral-storage)和持久存储(requests.storage)分别进行限制。设置合理的存储限制有助于提升集群的资源利用率和稳定性，避免因存储资源耗尽导致Pod被驱逐或调度失败。监控存储资源使用情况，结合LimitRange和ResourceQuota调整策略，是存储资源管理的最佳实践。Kubernetes通过LimitRange和ResourceQuota机制限制存储资源的请求和消耗，帮助管理员控制单个Pod和命名空间的存储使用量，防止资源滥用，保障集群稳定和高效运行。
+
+复制控制平面并迁移至云控制器管理器：是指将原本内嵌在kube-controller-manager中的云控制器，迁移到独立的cloud-controller-manager组件中运行的过程。Kubernates的kube-controller-manager中包含了云平台相关的控制器（如路由管理、服务管理、节点生命周期管理等），随着云提供商的代码被逐渐剥离，这些云平台相关的控制器必须迁移到独立的cloud-controller-manager中。这样做能让云提供商独立开发和更新其控制器，而不必等待Kubernetes主项目的版本发布。迁移的核心机制——Leader Migration（领导者迁移）：
+- Leader Migration是一种机制，支持高可用(HA)控制平面的环境下，云相关控制器在kube-controller-manager和cloud-controller-manager之间安全迁移。通过共享的资源锁，实现控制器领导权的切换，确保同一时间只有一方管理某个云控制器，避免冲突。迁移期间，两个组件同时运行，但控制器只会在一个组件中活跃。Leader Migration需要在两个组件上分别开启--enable-leader-migration参数，并配置迁移相关的配置文件(LeaderMigrationConfiguration)指定哪些控制器迁移到那个组件。迁移步骤：
+- 准备阶段：确保控制平面运行kube-controller-manager且启用领导者选举（Leader Election）。确认云提供商支持cloud-controller-manager且实现了Leader Migration。授权kube-controller-manager访问迁移租约（Lease）资源。
+- 配置Leader Migration：创建LeaderMigrationConfiguration配置文件，定义当前控制器归属（如route、service、cloud-node-lifecycle仍在kube-controller-manager）。修改kube-controller-manager的启动参数，挂载配置文件并启用Leader Migration。
+- 部署Cloud Controller Manager：在升级版本（N+1）中，部署cloud-controller-manager，配置相同的Leader Migration配置文件，但将云控制器的归属改为cloud-controller-manager。将kube-controller-manager的--cloud-provider参数改为external，且不再启用Leader Migration。
+- 滚动升级控制平面节点：逐个替换控制平面节点，从旧版本（仅运行kube-controller-manager）切换到新版本（运行kube-controller-manager和cloud-controller-manager）。迁移租约确保控制器领导权在两个组件间安全切换，避免冲突。直到所有节点升级完成，控制器完全迁移到cloud-controller-manager。
+- 回滚支持：如果需要回滚，可以将旧版本节点重新加入集群，启用Leader Migration，逐步替换新版本节点。
+
+适用场景：需要升级Kubernetes控制平面版本，同时迁移云提供商控制器到外部Cloud Controller Manager。运行高可用控制平面且不能容忍控制器管理组件停机的生产环境。云提供商已发布支持Leader Migration的外部Cloud Controller Manager。单节点控制平面或能容忍控制器停机的场景，可以跳过Leader Migration，直接切换。迁移过程中，确保RBAC权限允许访问迁移锁Lease资源。迁移配置文件支持指定具体控制器的归属，也可使用通配符*简化配置。迁移完成后，kube-controller-manager不再运行云相关控制器，cloud-controller-manager承担全部云控制职责。Kubernates的复制控制平面并迁移至云控制器管理器是一个通过Leader Migration机制。逐步将云相关控制器从kube-controller-manager迁移到独立的cloud-controller-manager的过程。此举实现了云控制器与核心控制器的解耦，提升了云提供商的灵活性和Kubernetes架构的模块化，是现代云原生集群管理的重要升级路径。
+
+Kubernates中的ETCD集群是Kubernates集群的核心数据存储后端，是一个一致性强、高可用的分布式键值存储系统，ETCD在Kubernates中的作用：ETCD用作Kubernates所有集群数据的后台数据库，存储集群状态、配置信息、服务返现数据等。它通过Raft一致性算法保证数据的强一致，确保集群状态的准确和可靠。Kubernates组件(kube-apiserver)通过访问ETCD来获取或更新集群状态。
+
+ETCD集群的特性：ETCD是一个基于Leader的分布式系统，集群中有一个主节点负责协调（Master），其他节点为从节点(Follower)。集群成员数量应为奇数，以保证选举机制的正常运行和数据一致性。ETCD集群对网络和磁盘I/O非常敏感，资源不足会导致心跳超时，进而导致集群不稳定，影响Kubernates调度和运行。生产环境中应保证 ETCD运行在资源充足的专用机器或隔离环境，避免资源竞争导致集群不稳定。定期备份 ETCD 数据，确保在故障时可以恢复集群状态。 ETCD 集群成员的动态添加和移除需要谨慎操作，避免影响集群稳定。对于大型 Kubernetes 集群，可以考虑对 ETCD 数据进行水平拆分，例如将 Pod 资源数据单独存储在一个 ETCD 集群中，以降低单个  ETCD 集群的负载和请求延迟。这种拆分需要谨慎规划和实施，避免影响数据一致性和集群稳定性。
+
+Kubernetes 中操作 ETCD 集群涉及集群的部署（单节点和多节点）、安全访问配置、性能资源保障以及定期备份恢复等方面。ETCD 是 Kubernetes 集群稳定和高可用的关键组件，合理配置和维护 ETCD 集群对整个 Kubernetes 集群的健康至关重要。
+
+Kubernates访问集群主要是通过Kubernates API实现的，API是Kubernates的核心接口，允许用户查询、修改集群状态。访问Kubernates集群的前提：你需要有一个运行中的Kubernates集群，需要有访问该集群的凭据（如 kubeconfig 文件），通常有集群管理员提供。本地安装并配置好kubectl命令行工具，它是访问Kubernates API最常用的客户端工具。可以通过命令kubectl config view查看当前配置的集群地址和凭据。访问Kubernates API的方式：
+- 使用 kubectl 命令行工具（推荐）。
+- 直接访问 REST API。
+- 使用客户端库。
+
+访问Kubernates API需要认证授权：常用的认证方式包括客户端证书、Bearer Token、认证代理等。认证成功后，API服务器会根据授权策略（如RBAC）决定是否允许访问特定资源和操作。常见的授权模式有RBAC、ABAC、Webhook授权等。访问 Kubernetes 集群主要通过 Kubernetes API，最常用和推荐的方式是使用 kubectl，它自动处理连接和认证。也可以直接调用 REST API，但需要手动管理认证信息。访问时必须通过认证和授权，确保集群安全。远程访问 Kubernetes API 需要额外配置安全机制和网络访问策略。
+
+Kubernates中为系统守护进程预留计算资源是指在节点资源管理中，专门为操作系统何Kubernates系统组件（守护进程）预留一定的CPU、内存和存储资源。避免这些系统进程与运行的Pod争夺资源，导致节点资源不足甚至系统不稳定的问题。Kubernetes 节点的所有资源（Capacity）都可以被 Pod 使用，这会带来风险：节点上运行的操作系统守护进程（如 sshd、udev）和 Kubernetes 系统组件（如 kubelet、container runtime）也需要资源，如果没有预留，Pod 可能会抢占这些资源，导致系统进程被杀死或节点状态异常，进而影响整个集群的稳定性。为了解决上述问题，Kubernates的kubelet提供了一个叫做Node Alloctable的特性，用于为系统守护进程和Kubernates组件预留资源，这样，即使节点负载很高，Pod也不会占用预留给系统进程的资源，避免资源争夺导致的节点不稳定。资源预留分类：
+- kube-reserved：为Kubernates系统守护进程预留资源，包含kubelet、container runtime、node problem detector等，但不包含以Pod形式运行的系统组件。
+- system-reserved：为操作系统的守护进程预留资源，如sshd、udev等，同时建议预留内核内存和用户登录会话资源。
+- eviction-threshold：为节点驱逐机制预留的资源阈值，防止节点过载时触发OOM杀死关键进程。
+
+支持预留的资源类型包括CPU、内存、临时存储和进程ID数量。节点资源分配可以理解为：
+```bash
+Node Capacity（节点总资源）
+  ├─ kube-reserved（Kubernetes 系统进程预留）
+  ├─ system-reserved（操作系统守护进程预留）
+  ├─ eviction-threshold（驱逐阈值预留）
+  └─ allocatable（可供Pod使用的资源）
+```
+计算公式为：allocatable = NodeCapacity − kube−reserved − system−reserved − eviction−threshold，Pod 调度时参考的是 allocatable 资源，而非节点总资源。在 kubelet 启动参数或配置文件中设置：--kube-reserved=cpu=100m,memory=100Mi,ephemeral-storage=1Gi,pid=1000、--system-reserved=cpu=100m,memory=100Mi,ephemeral-storage=1Gi,pid=1000，还可以指定对应的 cgroup：--kube-reserved-cgroup=/kubelet.service、--system-reserved-cgroup=/system.slice。这样 kubelet 会对这些守护进程的资源使用做硬限制，确保预留资源不被 Pod 占用。
+
+最佳实践：
+- 根据节点上实际运行的系统守护进程和 Kubernetes 组件的资源需求，合理配置 kube-reserved 和 system-reserved。
+- 确保对应的 cgroup 已经创建，避免 kubelet 启动失败。
+- 结合 eviction-threshold 设置，防止节点资源耗尽导致系统进程被杀。
+- 对于需要高性能或特殊场景（如电信/NFV），可以通过指定 CPU 集合（cpuset）和中断绑定，进一步隔离系统守护进程和工作负载。
+
+Kubernetes 的系统守护进程资源预留功能通过 Node Allocatable 特性，确保系统和 Kubernetes 组件有足够资源稳定运行，避免 Pod 资源抢占导致节点不稳定，是生产环境集群稳定性的重要保障。
+
+在Kubernates中，安全排空(Drain)节点是指对节点进行维护（如升级内核、硬件维护、下线节点等）之前，优雅地将节点上的所有Pod驱逐(evict)出去，确保应用不中断或尽量减少中断，从而保证集群的稳定性和服务的连续性。安全排空节点(Safely Drain a Node)：使用kubectl drain命令可以将指定节点标记为不可调度(unschedulable)组织新Pod调度到该节点，同事驱逐该节点上所有可驱逐的Pod（即非 DaemonSet 管理的 Pod 和非镜像 Pod），为节点维护腾出资源。如果直接关闭节点而不先排空，节点上的Pod会突然终止，导致服务中断，Kubernates会尝试在其他节点重新调度这些Pod，但这会带来延迟或潜在的服务不可用。通过kubectl drain，可以优雅的通知Kubernates迁移Pod，减少影响。
+
+安全排空节点的步骤：
+- 标记节点为不可调度（Cordon）：使用命令，kubectl cordon <node-name>。该操作阻止新的 Pod 调度到该节点，但不会影响已经运行的 Pod。
+- 驱逐节点上的 Pod（Drain）：使用命令，kubectl drain <node-name> --ignore-daemonsets --delete-emptydir-data。--ignore-daemonsets：忽略由 DaemonSet 管理的 Pod，因为它们会自动重新创建，无法被驱逐。--delete-emptydir-data：允许删除使用了 emptyDir 临时存储的 Pod，提醒数据会丢失。该命令会逐个驱逐节点上的 Pod，等待它们优雅终止，完成后节点即空闲。
+- 确认驱逐完成：使用命令，kubectl get pods --all-namespaces -o wide，确认该节点上没有非 DaemonSet 的 Pod 运行。
+- 维护完成后恢复节点调度：使用命令，kubectl uncordon <node-name>，使节点重新可调度，恢复正常使用。
+
+- 基于Kubernetes的机器学习工作负载：Kubeflow
+- 基于Kubernetes的无服务器环境：Apache OpenWhisk、Fission、Kubeless、nuclio和OpenFaaS
+- 基于Kubernetes构建的数据平台：Iguazio（数据流式分析）
+- 基于Kubernates的网络插件：Cilium、Flannel、Calico
