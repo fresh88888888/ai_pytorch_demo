@@ -1041,6 +1041,245 @@ Kubernetes 的系统守护进程资源预留功能通过 Node Allocatable 特性
 - 确认驱逐完成：使用命令，kubectl get pods --all-namespaces -o wide，确认该节点上没有非 DaemonSet 的 Pod 运行。
 - 维护完成后恢复节点调度：使用命令，kubectl uncordon <node-name>，使节点重新可调度，恢复正常使用。
 
+最佳实践：
+- 镜像Pod(Mirror Pod)不会被驱逐，因为它是静态Pod的API代理，无法通过API删除。
+- 非控制器管理的Pod（如没有 ReplicaSet、DaemonSet、StatefulSet 管理的 Pod）默认不会被驱逐，除非加 --force 参数。
+- 使用 --grace-period参数设置Pod终止的宽限时间，保证Pod有时间优雅关闭。
+- 在共享集群环境中，排空节点前应通知相关团队，避免影响业务。
+- 更新负载均衡器配置，避免流量继续发送到正在排空的节点。
+- 排空节点之后，建议检查Pod是否成功重新调度到其他节点，确保应用可用性。
+
+安全排空节点是 Kubernetes 集群维护和节点管理中的关键操作，能够优雅地迁移节点上的工作负载，避免因节点维护导致的服务中断。通过 kubectl drain 命令配合合理参数使用，可以确保节点维护过程平滑、安全，提升集群稳定性和业务连续性。
+
+Kubernates集群安全(Securing a Cluster)涉及保护集群免受恶意访问，确保集群组件、数据和应用的安全性。
+
+控制平面访问与保护：
+- 限制对Kubernates API的访问：控制平面是集群的核心，必须严格限制API Server的访问权限，通常通过启用TLS加密传输，确保数据在控制平面内部及客户端之间安全传输。
+- 保护ETCD存储：ETCD时Kubernates的关键数据存储，写权限相当于集群管理员权限，读权限也可能导致权限升级。应启用TLS双向认证，使用强凭证，并将ETCD隔离在防火墙之后，进允许APIServer访问。
+- 启用审计日志(Audit Logging)：记录API调用的安全相关事件，便于事后分析和监测异常访问行为。
+
+身份认证授权：
+- 启用RBAC（基于角色的访问控制）：通过定义角色绑定，精细控制用户和服务账户对资源的访问权限，遵循最小权限原则，避免使用过款权限。
+- 禁用匿名访问：确保所有访问均经过身份验证。
+- 集成第三方认证（如 OAuth、LDAP），增强认证的安全性，支持多因素认证。
+
+工作负载安全：
+- Pod安全标准：通过 Pod Security Admission或策略确保容器隔离，限制特权容器和敏感权限。
+- 网络策略(NetworkPolicy)：限制Pod之间与Pod与外部网通的通信，实施默认拒绝策略，减少攻击面。
+- Secrets管理：使用Kubernates Secret资源存储敏感信息，启用加密存储，限制访问权限，避免明文暴露。
+- 镜像安全：使用受信任的镜像仓库，定期扫描镜像漏洞，避免使用过时或不安全的镜像。
+
+节点安全：
+- 节点访问控制：限制对节点的SSH等访问，避免绕过Kubernates API的直接操作。
+- 进程白名单和运行时安全：监控节点和容器运行的进程，检测异常行为，防止恶意代码执行。
+- 资源隔离：合理配置资源请求和限制，避免资源争抢导致系统不稳定。
+
+其他安全措施：
+- 网络隔离和分段：通过命名空间和网络策略实现多租户隔离，限制不同团队和应用之间的访问
+- 关闭不必要的端口和功能，减少攻击面。
+- 定期安全扫描和基准检测：使用工具如kube-bench检测集群配置是否符合CIS Kubernetes Benchmark 等安全标准。
+- 及时更新和补丁管理：修复已知漏洞，避免被利用。
+
+Kubernates集群安全是一个系统工程，涵盖从控制平面保护、身份认证授权、工作负载隔离、节点安全到网络策略、审计日志等多个方面。通过启用RBAC、TLS加密、网络策略、Secrets管理、审计日志以及合理配置准入控制器，结合定期安全扫描和监控，可以有效降低集群被攻击和数据泄漏的风险，保障集群和应用的安全稳定运行。
+
+Kubernates中通过配置文件设置kubelet参数是一种推荐方式。用于替代传统的命令行参数配置，简化节点部署和管理，提高配置的可维护性和一致性。
+- 配置文件的结构和格式：kubelet 配置文件必须是 JSON 或 YAML 格式，内容基于 Kubernetes 提供的 KubeletConfiguration 结构体定义。配置文件中必须包含 apiVersion 和 kind 字段，例如：
+```yaml
+apiVersion: kubelet.config.k8s.io/v1beta1
+kind: KubeletConfiguration
+address: "192.168.0.8"
+port: 20250
+serializeImagePulls: false
+evictionHard:
+......
+```
+- 配置文件的优点：通过配置文件管理kubelet参数，避免了复杂的命令行参数的堆积。方便版本控制和统一管理。支持部分参数的增量覆盖和合并（通过drop-in目录机制），提高灵活性。
+- 配置文件的使用方式：启动 kubelet 时通过 --config 参数指定配置文件路径，例如：kubelet --config=/var/lib/kubelet/config.yaml。也可以使用配置文件的 drop-in 目录（如 /etc/kubernetes/kubelet.conf.d），kubelet 会按文件名排序合并配置，支持分片管理配置。
+- 配置合并与优先级：kubelet启动时会合并以下配置，优先级从低到高：命令行中的 feature gates（最低）、配置文件中的 kubelet 配置、drop-in 目录中的配置文件（按文件名排序）、命令行中除 feature gates 外的参数（最高）。配置文件中修改某些字段（如 evictionHard）时，未指定的字段默认会被置零，除非开启 MergeDefaultEvictionSettings 选项。
+- 与kubeadm的集成：使用 kubeadm 初始化集群时，会自动生成 kubelet 配置文件（通常位于 /var/lib/kubelet/config.yaml），并在集群中以 ConfigMap 形式保存，方便统一管理和升级。也支持通过自定义 KubeletConfiguration 文件传递给 kubeadm，实现集群级别和节点级别的 kubelet 配置定制。
+- 应用场景：配置节点资源驱逐阈值（如内存、磁盘空间）以提升节点稳定性。调整kubelet监听地址和端口。配置镜像拉取策略、日志级别、认证授权参数。
+
+通过配置文件设置 kubelet 参数是 Kubernetes 官方推荐的方式，能简化节点配置管理，提高配置一致性和灵活性。配置文件基于 KubeletConfiguration 结构，支持 JSON/YAML 格式，且可以与命令行参数结合使用，支持分片配置和合并。结合 kubeadm 等工具，可以实现集群级和节点级的 kubelet 配置自动化管理。
+
+命名空间是 Kubernetes 中用于将集群资源划分为逻辑分区的机制。在同一个集群中，不同命名空间内的资源（如 Pod、Service、Deployment 等）名称可以重复，但同一命名空间内资源名称必须唯一。命名空间为集群资源提供了作用域，便于不同团队、项目或租户在同一集群中独立管理和使用资源。假设一个组织有开发团队和运维团队共用一个 Kubernetes 集群：开发团队需要一个灵活的空间，可以频繁创建和删除 Pod、Service，权限相对宽松，方便快速迭代。运维团队需要一个稳定且权限严格的空间，管理生产环境的应用，防止误操作影响线上服务。这时可以通过创建两个命名空间来隔离：development 命名空间供开发团队使用；production 命名空间供运维团队使用。这样，两个团队在逻辑上分隔开，互不干扰，同时共享同一个物理集群资源。命名空间的作用和优势：
+- 资源隔离：不同命名空间的资源相互隔离避免了命名冲突和资源干扰。
+- 权限控制：结合RBAC，可以为不同的命名空间分配不同的访问权限，实现安全隔离。
+- 资源配额：通过ResourceQuota对命名空间内的资源使用进行限制，防止某个命名空间耗尽集群资源。
+- 组织管理：便于按照团队、项目或环境划分资源，提升集群管理的条理性和可维护性。
+- 多租户支持：命名空间是Kubernates实现软多租户的基础，结合网络策略、配额和权限管理，可以实现一定程度的租户隔离。
+
+Kubernates集群升级(Upgrade A Cluster)是维护集群安全性、稳定性和功能性的关键操作。升级过程主要包括控制平面和节点的版本更新，以及相关客户端工具的升级。升级前的准备：确认当前集群版本，确保了解目标升级版本及其兼容性和变更内容。备份重要数据，尤其是 etcd 数据和关键配置文件，防止升级失败时数据丢失。检查集群组件和应用兼容性，包括 API 变更、弃用功能、插件和自定义控制器等。阅读官方升级文档和变更日志，了解新版本的改动和注意事项。规划维护窗口，避免在业务高峰期进行升级，减少对业务的影响。
+
+升级步骤：
+- 升级控制平面（Control Plane）：控制平面包括 kube-apiserver、kube-controller-manager、kube-scheduler 等组件。如果使用 kubeadm 部署，可通过 kubeadm upgrade 命令升级控制平面节点。手动部署时，需依次升级 etcd、kube-apiserver、controller-manager、scheduler 等。升级后确认控制平面组件正常运行。
+- 升级工作节点（Worker Nodes）：逐个或少量节点升级，避免同时下线过多节点影响业务。先使用 kubectl drain 命令排空节点，驱逐 Pod，保证 Pod 能够安全迁移。升级节点上的 kubelet 和相关组件版本。升级完成后，使用 kubectl uncordon 恢复节点调度。确认节点状态为 Ready，且版本正确。
+- 升级客户端工具：升级 kubectl 等客户端工具，确保与集群版本兼容。更新相关管理工具和插件。
+- 调整和验证：根据新版本的 API 变更，更新资源清单（manifests）和应用配置。验证集群和应用的正常运行，监控日志和性能指标。清理升级过程中产生的备份文件和临时数据。
+
+重要注意事项：
+- 分步升级：Kubernetes 只支持逐个小版本升级（例如从 1.21 升到 1.22），不支持跳跃式大版本升级。
+- 备份恢复：升级失败时，可利用 kubeadm 生成的备份文件恢复 etcd 和静态 Pod 配置。
+- 高可用集群：在多控制平面节点环境下，逐个节点升级，确保集群持续可用。
+- API 弃用：升级前检查应用是否使用了弃用或移除的 API，及时调整。
+- 自动化工具：云厂商如AWS EKS、Azure AKS提供托管升级方案，简化操作并减少风险。
+
+Kubernetes 集群升级是一个系统化的过程，核心步骤是先升级控制平面，再逐步升级工作节点，最后升级客户端工具和调整配置。合理规划、备份、分步执行和验证是保证升级成功和集群稳定的关键。使用 kubeadm 等工具可以简化升级流程，云服务商的托管 Kubernetes 也提供了自动化升级方案，适合不同规模和需求的集群环境。
+
+Kubernates集群中使用级联删除是指再删除某个资源对象时，自动删除该对象所拥有的相关从属资源（如 Pod、ReplicaSet 等），以确保资源的完整清理，避免孤儿资源残留保持集群的整洁和一致性。级联删除的原理：Kubernates通过资源对象中的ownerReferences字段来建立父子关系，表示哪些资源是某个父资源的从属对象。当删除父资源时，垃圾回收器（Garbage Collector）会根据配置的删除策略，自动删除这些从属资源。级联删除的三种主要策略：
+- Foreground（前台删除）：先删除所有从属资源，待所有子资源删除完成之后，才删除父资源。删除过程中父资源处于”删除进行中“状态，并带有 foregroundDeletion finalizer。命令示例：kubectl delete deployment nginx-deployment --cascade=foreground。
+- Background（后台删除，默认）：父资源立即被删除，垃圾回收器异步在后台删除所有从属资源。删除速度快，但子资源可能在父资源删除后短暂存在。命令示例：kubectl delete deployment nginx-deployment --cascade=background。
+- Orphan（孤儿删除）：删除父资源时不删除从属资源，子资源变成孤儿，独立存在。适用于希望保留子资源的场景。命令示例：kubectl delete deployment nginx-deployment --cascade=orphan。
+
+Kubernates使用KMS进行数据加密，主要是为了保障集群中敏感数据在存储时的安全性，KMS Provider的加密机制，Kubernates采用信封加密(Envelope Encryption)机制来保护数据。这种方式使得加密秘钥的管理与数据存储分离，提高了安全性攻击者如果只拿到ETCD数据，仍需同时攻破KMS才能获得明文数据。具体流程是：
+- API Server为每个需要加密的资源（如Secret）生成一个随机的数据加密秘钥（Data Encryption Key，DEK）。
+- 使用这个DEK对资源数据进行加密。
+- 然后调用外部的KMS服务，用KMS中的主密钥（Key Encryption Key，KEK）对DEK进行加密。
+- 将加密后的DEK和加密数据一起存储在ETCD中。
+- 读取数据时，API Server先调用KMS解密DEK，再用解密后的DEK解密数据。
+
+KMS Provider的部署与通信：
+- KMS Provider通过一个gRPC插件与Kubernates API Server通信。
+- 该插件通常作为静态Pod部署在控制平面节点上，API Server通过UNIX域套接字与插件进行通信插件再与远程KMS服务交互完成秘钥的加解密操作。
+- 通信过程需要TLS等传输层安全机制保证数据在传输过程中的安全。
+
+配置 KMS Provider 需要创建一个 EncryptionConfiguration 配置文件，指定使用 kms 类型的 provider，配置 KMS 插件的名称、通信地址（UNIX socket）、超时时间等参数。在 kube-apiserver 启动参数中添加 --encryption-provider-config 指向该配置文件。重启 kube-apiserver 使配置生效。KMS Provider 依赖外部的密钥管理服务，密钥的安全存储和访问控制非常重要。需要保护好本地的 KMS 插件和 API Server 的通信认证信息，防止密钥泄露。即使使用 KMS，仍需做好 etcd 和控制平面节点的安全防护，防止主机被攻破。Kubernetes 通过集成 KMS Provider 使用信封加密机制，安全地管理和加密集群中的敏感数据，极大提升了数据在静态存储时的安全性，同时也支持灵活的密钥管理和轮换策略，是生产环境中保护 Secrets 等敏感信息的关键技术手段。
+
+CoreDNS是一个灵活且可扩展的DNS服务器，就插件架构设计，能够通过不同插件实现多种功能。已成为 Kubernetes 默认的 DNS 服务组件，替代了早期的 kube-dns。CoreDNS 通过 Kubernetes 插件实现对Kubernates服务发现规范的支持，能够实时监听Kubernates API，动态同步服务和Pod的DNS记录。Kubernates中的每个Pod都有一个动态分配的IP地址，但Pod是短暂且可变的，可能因重启或迁移等原因导致IP变化。CoreDNS负责将服务名（如 my-service.default.svc.cluster.local）解析为对应的Cluster IP或Pod IP确保集群内各组件能通过稳定的DNS名称访问服务，而不必关心底层IP地址的变化。Pod内部的/etc/resolv.conf文件会配置一个指向CoreDNS服务的Cluster IP（通常是 kube-dns 服务的 IP），所有DNS的查询都会发送到CoreDNS。
+
+CoreDNS的工作流程：
+- Pod发起DNS查询，请求解析某个服务名。
+- 查询请求被发送到CoreDNS的Cluster IP。
+- CoreDNS通过Kubernates插件查询Kubernates API，获取相应的服务和Endpoints信息。
+- CoreDNS返回对应的IP地址给Pod，Pod通过该IP地址访问目标服务。
+
+CoreDNS 配置与管理：
+- CoreDNS的配置文件称为Corefile，采用插件化配置，可以灵活定制DNS行为，如缓存、转发、日志、重定向等。
+- 集群管理员可以通过CoreDNS的ConfigMap来调整DNS服务的行为，比如添加自定义域名解析、配置上游DNS服务器等。
+- CoreDNS作为Deployment运行在kube-system命名空间，通过kube-dns Cluster IP服务暴露，集群中的所有Pod通过该服务访问DNS。
+
+CoreDNS 的优势：
+- 动态更新：自动同步Kubernates中的服务和Pod变化，保证DNS记录实时准确。
+- 模块化插件架构：支持多种插件扩展，满足复杂的DNS需求。
+- 高性能和稳定性：支持缓存机制和负载均衡，提升解析速度和可靠性。
+- 易于替换和升级：可以无缝替换早起的kube-dns，且支持通过kubeadm等工具方便升级。
+- 使用场景：集群内服务间通信通过服务名访问，避免硬编码IP。支持跨命名空间访问服务，使用完整的DNS域名格式： <service>.<namespace>.svc.<cluster-domain>。配合NodeLocal DNSCache使用进一步提升DNS查询性能和稳定性。
+
+CoreDNS 是 Kubernetes 集群中实现服务发现的核心组件，通过动态解析服务和 Pod 的 DNS 名称，解决了容器环境中服务 IP 动态变化带来的访问难题，保证了集群内服务的可靠互联。它的灵活配置和插件机制也为集群管理员提供了强大的定制能力。
+
+NodeLocal DNSCache是Kubernates集群中用于提升DNS性能和稳定性的一个重要功能，它通过在每个集群节点上以DaemonSet形式运行一个本地DNS缓存代理，来加速DNS查询，减少对中心化DNS服务（如 CoreDNS 或 kube-dns）的压力，从而优化集群内的服务发现和网络性能。
+
+NodeLocal DNSCache的工作原理：
+- 在传统的Kubernates架构中，处于ClusterFirst DNS 模式的Pod会将DNS查询请求发送到kube-dns的Service IP，然后通过kube-proxy的iptables规则转发到CoreDNS端点进行解析。
+- 使用 NodeLocal DNSCache 后，每个节点上会运行一个本地DNS缓存代理（DaemonSet），Pod的DNS会先访问同节点上的缓存代理，避免了跨节点的网络跳转和iptables的DNAT转换。
+- 如果本地缓存未命中（尤其是集群内部域名如 cluster.local），本地缓存代理会向kube-dns服务发起查询。
+- 对于集群外部的DNS查询，本地缓存代理则会直接转发到外部DNS服务器（如云服务商的 DNS 或 VPC DNS），减少了kube-dns的负担。
+
+NodeLocal DNSCache 的优势：
+- 降低了DNS的查询延迟：本地缓存减少了网络跳数和查询时间，DNS查询响应更快更稳定。
+- 减少kube-dns/CoreDNS负载：大量DNS请求有本地缓存处理，减轻中心DNS服务的压力，避免瓶颈。
+- 避免连接跟踪表(conntrack)压力：Pod到本地缓存的连接不产生conntrack条目降低连接丢失和拒绝风险。
+- 提升集群扩展性：分布式缓存架构使集群在大规模化环境下仍能保持高效的DNS解析能力。
+- 提高服务发现稳定性：缓存机制减少了DNS解析失败的概率，提升应用的可用性。
+- 使用场景：中大型 Kubernetes 集群，尤其是 DNS 查询请求量大，CoreDNS 负载高时。需要提升 DNS 查询性能和稳定性的生产环境。云厂商托管 Kubernetes 服务（如 GKE、ACK）通常提供开箱即用的 NodeLocal DNSCache 支持。
+
+NodeLocal DNSCache 是 Kubernetes 集群中通过在每个节点本地运行 DNS 缓存代理来优化 DNS 查询性能和稳定性的解决方案。它减少了跨节点网络跳转和中心 DNS 服务压力，提升了集群的服务发现效率和整体用户体验。
+
+在Kubernates集群中，sysctls是Linux内核参数的配置接口，允许管理员在运行时修改内核行为，Kubernates支持通过Pod的安全上下文来设置部分可命名空间隔离（namespaced）的sysctls参数，从而为容器提供定制化的内核参数配置。
+- Namespaced sysctls（命名空间隔离的 sysctls）：这些参数可以针对每个 Pod 独立设置，不会影响同一节点上的其他 Pod。常见的命名空间 sysctls 包括：kernel.shm*（共享内存相关）、kernel.msg*（消息队列相关）、kernel.sem（信号量相关）、fs.mqueue.*（消息队列文件系统）、net.*（网络相关）只有这些命名空间的 sysctls 才能通过 Pod 的 安全上下文进行配置。
+- Node-level sysctls（节点级 sysctls）：这类参数不支持命名空间隔离，必须在节点操作系统层面统一配置，例如通过修改/etc/sysctl.conf文件或DaemonSet运行特权容器来设置节点级的sysctls影响整个节点，不能单独为某个Pod进行设置。
+- Safe sysctls（安全 sysctls）：这些 sysctls 不会影响节点稳定性或其他 Pod，Kubernetes 默认允许设置。常见的安全 sysctls 有：kernel.shm_rmid_forced、net.ipv4.ip_local_port_range、net.ipv4.tcp_syncookies。这些可以直接在 Pod 中配置，无需额外授权。
+- Unsafe sysctls（不安全 sysctls）：这类 sysctls 可能导致节点或容器异常，默认被禁用。要使用它们，集群管理员必须在目标节点的 kubelet 中显式允许，例如通过 kubelet 启动参数 --allowed-unsafe-sysctls 指定允许的 unsafe sysctls。Pod 使用 unsafe sysctls 时，必须调度到支持这些 sysctls 的节点上，通常配合节点污点（taints）和容忍（tolerations）机制实现调度控制。
+
+sysctl 是 Linux 专用功能，非 Linux 系统不可用。只有命名空间隔离的 sysctls 能在 Pod 级别设置。使用 unsafe sysctls 有风险，可能导致容器异常或节点崩溃，需谨慎使用。Kubernetes 1.23 及以后版本支持用斜杠(/)或点号(.)作为 sysctl 名称的分隔符，方便配置。总结来说，Kubernetes 通过支持 sysctls，允许用户在容器级别微调内核参数，提升应用性能或满足特殊需求。安全的 sysctls 可直接配置，危险的 sysctls 需管理员授权并配合节点调度策略使用，以保证集群稳定性和安全性。
+
+NUMA(Non-Uniform Memory Access)是一种计算机体系结构，多个CPU访问不同内存区域的速度不同。每个NUMA节点包含一组CPU和本地内存，访问本地内存速度快，访问远端NUMA节点内存则存在额外延迟。在NUMA架构下，如果容器的CPU和内存分配跨NUMA节点，回答值性能下降和延迟增加。为此，需要保证容器的CPU、内存和设备资源都在同一个NUMA节点上，以获得最佳性能。Kubernetes中的**NUMA感知内存管理器**（NUMA-aware Memory Manager）是为了解决多核服务器中非统一内存访问（NUMA）架构下的内存分配效率和性能问题而设计的关键组件。它自 Kubernetes 1.22 版本起进入 Beta，1.32 版本稳定并默认启用，主要用于为处于 Guaranteed QoS 类别的 Pod 提供保证的内存分配，尤其适合对性能和延迟敏感的高性能应用。
+
+Kubernates NUMA感知内存管理器(NUMA-aware Memory Manager)的作用：
+- 保证内存分配的NUMA亲和性：内存管理器会计算Pod中每个容器可能的NUMA节点组合，生成拓扑提示，并将这些提示提供给拓扑管理器(Topology Manager)进行协调调度，确保内存和CPU资源在同一个NUMA节点或最少得NUMA节点上分配。
+- 内存预留和状态管理：他负责为Guaranteed QoS Pod 预留内存更新节点内存状态，避免内存超额分配导致的OOM（内存溢出）错误。
+- 与拓扑管理器协同工作：内存管理器作为提示的提供者，参与kubelet的Admission阶段帮助拓扑管理器决定是否接受Pod以及如何分配资源。
+- 支持HugePage：除了普通内存，内存管理器也支持对HugePage（大页内存）的保证分配。
+
+NUMA感知内存管理器(NUMA-aware Memory Manager)工作流程：
+- Admission阶段：kubelet调用拓扑管理器的Admit()方法，拓扑管理器再调用内存管理器的GetTopologyHints() ，内存管理器计算并返回NUMA亲和提示。
+- 资源分配：Topology管理器根据所有hints选择最合适的NUMA组合，调用内存管理器的Allocate() 分配内存。
+- Pod创建：内存分配完成之后，Pod在指定的NUMA节点的内存上运行，保证性能和延迟。
+
+优势和适用场景：
+- 提升性能和降低延迟：对于高性能、低延迟需求的应用（如电信、数据库、大数据等），NUMA感知内存管理器能显著提升内存访问效率。
+- 提高资源利用率：通过合理分配内存和CPU，减少跨NUMA节点访问，提升节点上Pod的密度和性能。
+- 避免OOM和资源争用：预留和保证内存分配避免了因内存分配不足而导致的容器被杀死。
+
+NUMA感知内存管理器(NUMA-aware Memory Manager)仅适用于Linux节点，需要配合 CPU Manager 和 Topology Manager 使用，且策略配置要匹配。配置不当可能导致 Pod 无法调度或启动，尤其是在启用严格的拓扑策略时。需要理解节点的 NUMA 拓扑结构，合理预留内存和配置策略。Kubernetes 的NUMA感知内存管理器(NUMA-aware Memory Manager)是面向多NUMA节点服务器的内存分配优化组件，通过与拓扑管理器协同工作，确保容器的CPU和内存资源在同一个NUMA节点或最优组合内分配显著提升高性能工作负载的运行效率和稳定性。
+
+Kubernates中的验证已签名的 Kubernetes 工件是确保下载和部署的二进制文件、容器镜像等软件工件的完整性和可信来源的关键安全步骤。通过验证签名，用户可以确认工件违背篡改，其确实由官方或可信发布者发布。验证已签名的 Kubernetes 工件流程：
+- 签名机制：Kubernates官方发布的二进制文件（如kubectl、kubelet）、压缩包以及SPDX软件材料清单(SBOM)等工件，都使用了cosign的无秘钥(keyless)签名的安全性和不可伪造性。这种签名方式基于Sigstore项目，利用OIDC认证和X.509证书来确保签名的安全性和不可伪造性。
+- 验证工具：需要安装sosign工具（由 Sigstore 提供）以及常用的curl和jq用于下载和处理文件。使用 cosign verify-blob 命令结合下载的签名文件(.sig)和证书文件(.cert)来验证二进制文件的签名。验证时需制定证书的身份(--certificate-identity)和OIDC发行者(--certificate-oidc-issuer)，确保签名的合法性。
+- 验证示例：
+```bash
+URL=https://dl.k8s.io/release/v1.33.0/bin/linux/amd64
+BINARY=kubectl
+FILES=("$BINARY" "$BINARY.sig" "$BINARY.cert")
+
+for FILE in "${FILES[@]}"; do
+  curl -sSfL --retry 3 --retry-delay 3 "$URL/$FILE" -o "$FILE"
+done
+
+cosign verify-blob "$BINARY" \
+  --signature "$BINARY.sig" \
+  --certificate "$BINARY.cert" \
+  --certificate-identity krel-staging@k8s-releng-prod.iam.gserviceaccount.com \
+  --certificate-oidc-issuer https://accounts.google.com
+```
+- 验证软件材料清单(SBOM)：Kubernates也提供了软件物料清单(SBOM)的签名和校验，用户可以下载对应的SPDX文件及其签名和证书，通过cosign verify-blob 进行验证，确保软件组件的完整性和合规性。
+- 镜像签名验证：对于容器镜像，除了手动验证外，生产环境中通常使用 sigstore policy-controller 这类Admission Controller自动在部署时验证镜像签名，只有签名有效的镜像才能被调度运行。这可以防止未授权或被篡改的镜像进入集群，增强安全性。只从官方渠道或可信源下载 Kubernetes 组件。在 CI/CD 流水线中集成签名验证步骤，自动阻止未签名或签名无效的工件部署。使用 Admission Controller 实现运行时的镜像签名验证。结合公钥基础设施（PKI）和证书管理，确保签名证书的有效性和可信链。
+
+Kubernates通过使用cosign的无秘钥签名技术，为官方发布的二进制文件和镜像提供强有力的签名保证。用户和管理员可通过官方文档提供的工具和流程验证下载的工件，确保软件的完整性和来源可信，防止供应链攻击和软件篡改，提升集群安全性和可靠性。
+
+在Kubernates集群中，为容器和Pod分配内存资源是保证应用稳定运行和合理利用集群资源的关键操作。Kubernates通过资源请求(requests)和资源限制(limits)来管理内存资源：
+- 内存请求(memory request)：指定容器启动时保证分配的最小内存量。Kubernates调度器根据内存请求决定将Pod调度到哪个节点，确保节点有足够的内存满足请求。请求的内存是容器运行时的“保底”资源。
+- 内存限制(memory limit)：指定容器允许使用的最大内存量，容器不能超过该限制，否则可能被系统杀死(OOM)。限制用于防止单个容器占用过多内存影响其它容器。
+
+配置方式：在Pod的YAML文件中，通过resources字段为容器指定内存请求和限制，例如：
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: memory-demo
+  namespace: mem-example
+spec:
+  containers:
+  - name: memory-demo-ctr
+    image: polinux/stress
+    resources:
+      requests:
+        memory: "100Mi"    # 内存请求
+      limits:
+        memory: "200Mi"    # 内存限制
+    command: ["stress"]
+    args: ["--vm", "1", "--vm-bytes", "150M", "--vm-hang", "1"]
+```
+上述示例中，容器请求 100Mi 内存，限制 200Mi 内存，实际运行时尝试分配 150Mi 内存。
+
+工作机制：
+- 调度阶段：调度器根据Pod中所有容器的内存请求总和，选择一个足够可用内存的节点进行调度。
+- 运行阶段：kubelet启动容器时将请求和限制传递给容器运行时（如contained或Docker），通过Linux的cgroups实现资源限制。内存请求用于保证内存预留，避免节点内存过载。内存限制是硬限制，容器超出限制会被内核OOM杀死。
+- 监控和回收：当节点内存紧张时，系统优先回收使用超过请求的容器内存，保证请求内存的容器优先稳定运行。
+
+Pod级别的内存资源配置：Kubernates支持在Pod级别统一配置内存请求和限制，优先级高于容器级别配置。PodLevelResources功能后，可以在Pod spec中直接指定：
+```yaml
+spec:
+  resources:
+    requests:
+      memory: "100Mi"
+    limits:
+      memory: "200Mi"
+```
+此时 Pod 内所有容器的资源请求和限制会被 Pod 级别配置覆盖，方便统一管理。使用 kubectl top pod <pod-name> 可以查看 Pod 实时内存使用情况，帮助判断内存请求和限制是否合理。例如，Pod 请求 100Mi，限制 200Mi，实际使用 150Mi，处于合理范围内。内存请求影响调度，设置过低可能导致Pod被调度到内存不足的节点，运行时出现OOM。内存限制防止容器占用过多内存，但设置过低可能导致容器频繁被杀死。资源请求和限制应该根据应用的实际需求合理配置，避免资源浪费或不足。结合监控和调优，动态调整资源配置。Kubernates通过内存请求和限制机制，确保容器和Pod在集群中合理分配和使用内存资源，保障应用性能和集群稳定性。合理配置内存资源是Kubernates资源管理的重要实践。
+
+
+
+
 - 基于Kubernetes的机器学习工作负载：Kubeflow
 - 基于Kubernetes的无服务器环境：Apache OpenWhisk、Fission、Kubeless、nuclio和OpenFaaS
 - 基于Kubernetes构建的数据平台：Iguazio（数据流式分析）
