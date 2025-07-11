@@ -2583,12 +2583,701 @@ spec:
 
 PodDisruptionBudget是Kubernetes中保障应用在节点维护、升级等操作期间高可用的重要工具。通过定义允许的最小可用Pod数量或最大不可用Pod数量，PodDisruptionBudget帮助集群管理员和调度器协调操作，避免因过度驱逐导致服务中断。合理配置和使用PodDisruptionBudget，是构建稳定可靠Kubernetes应用的关键实践之一。
 
+在Kubernates中，CronJob适用于运行周期性自动化任务的资源对象，类似于传统的Unix/Linux系统中的crontab（cron表）文件中的一行。它允许用户按照预定的时间表（使用Cron格式）周期性的执行任务，比如备份、生成报告、发送邮件等。CronJob通过Cron表达式定义任务执行的时间和频率，比如每分钟、每天凌晨2点等。CronJob控制器会根据设定的时间周期，自动创建对应的Job资源，Job再负责创建Pod来执行任务。由于同一个CronJob在某些额情况下可能会并发创建多个任务实例，任务本身应设计为幂等，避免重复执行带来的副作用。CronJob名称必须符合DNS子域名规则，且长度限制在52个字符以内，以避免生成的Job名称超过Kubernates限制。
 
+CronJob配置示例，一个典型的CronJob YAML配置示例如下，表示每分钟执行一次打印当前时间和消息的任务：
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: hello
+spec:
+  schedule: "*/1 * * * *"  # 每分钟执行一次
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: hello
+            image: busybox
+            imagePullPolicy: IfNotPresent
+            command:
+            - /bin/sh
+            - -c
+            - date; echo Hello from the Kubernetes cluster
+          restartPolicy: OnFailure
+```
+这里的schedule字段使用了cron表达式，定义任务的执行时间和频率。关键配置参数和策略：
+- schedule：Cron表达式，支持5位（分、时、日、月、周），定义任务调度时间。
+- startingDeadlineSeconds：任务错过执行时间后，允许延迟执行的最大秒数，避免任务无限期延迟。
+- concurrencyPolicy：并发策略，控制当上一个任务未完成时，新的任务是否允许并发执行，选项包括：Allow（默认）：允许并发运行多个任务。Forbid：禁止并发，新任务等待旧任务完成。Replace：替换正在运行的任务，杀死旧任务启动新任务。
+- successfulJobsHistoryLimit和failedJobsHistoryLimit：分别控制保留成功和失败任务的历史记录数量，方便追踪和调试。
+- suspend：暂停CronJob的执行，设置为true时暂停所有后续任务。
+
+CronJob适合各种需要定时执行的自动化任务，定时备份数据库、文件等重要数据。定期清理日志或临时文件。定时生成和发送报告。定时执行批处理任务或调用API。低活跃周期的任务调度。CronJob 控制器每隔一定时间（通常是10秒）从 Kubernetes API Server 中检查 CronJob 资源，判断是否需要触发新的 Job 创建。当达到预定时间，CronJob 控制器会创建对应的 Job，Job 控制器负责创建 Pod 并确保任务执行成功。Kubernetes 的 CronJob 是一个强大且灵活的定时任务管理工具，它结合了 Kubernetes 的资源调度和容器化优势，支持复杂的自动化任务调度。通过合理配置调度时间、并发策略和任务历史管理，CronJob 能有效支持各种周期性任务的自动执行和管理
+
+在Kubernates中，使用工作队列进行粗粒度并行处理是一种通过Kubernates Job运行多个并行工作进程的方式，适合处理一批独立的任务单元。其核心原理是每个Pod在启动时，从消息队列中取出一个任务，执行完毕之后将任务从队列中删除，然后该Pod退出，整个Job中的所有Pod并行完成所有任务。具体流程如下：
+- 启动消息队列服务，该服务负责存储任务队列。
+- 创建一个任务队列，并将任务消息放入队列中。
+- 启动一个Kubernates Job，该Job会启动多个Pod。
+- 每个Pod启动后，从消息队列中获取一个任务，执行任务，完成之后将该任务从队列中删除，然后Pod退出。
+- 当所有任务都被处理完毕，所有Pod也都成功退出，Job结束。
+
+这种方法不需要修改现有的代码，只需让程序能够从队列中获取任务即可，任务和工作程序解耦，工作程序可以保持原样封装在容器镜像中。适合任务粒度较大、每个任务耗时较长的场景。该方法需要额外运行一个消息队列服务，每个任务对应一个Pod，若任务非常短小，频繁创建Pod会带来较大开销。若任务较小或需要更高效的资源利用，可以考虑细粒度的并行处理方式，即每个Pod处理多个任务。Kubernetes的粗粒度工作队列并行处理是一种通过消息队列分发任务，多个Pod并行消费任务，完成后退出的模式，适合任务较大且独立的批量处理场景。
+
+在Kubernates中，使用工作队列细粒度并行处理是一种通过Kubernates Job启动多个并行Pod，每个Pod持续从任务队列中获取并处理任务，直到队列中的任务全部完成。通常使用 Redis 作为存储和管理任务队列的服务，因为 Redis 支持高效的队列操作和任务状态管理，适合细粒度任务的持续消费。将多个细粒度任务放入Redis队列，每个任务是一个独立的工作单元。启动一个Kubernates Job，Job会创建多个Pod作为工作进程，每个Pod启动后，反复从Redis队列中取出一个任务，处理完成后继续取下一个，直到队列为空。与粗粒度处理不同，细粒度处理的Pod不会处理完一个任务就退出，而是持续循环处理多个任务，直到队列耗尽，这样可以减少频繁创建或销毁Pod的开销，提高资源利用率。适合任务粒度较小、任务数量较多且处理时间较短的场景，能够更高效的利用集群资源，避免启动大量的短生命周期Pod带来的调度和启动开销。细粒度并行处理在资源有限时可能导致部分 Pod 长时间处于 Pending 状态，影响 Job 的整体完成时间。在实际应用中，可能需要结合集群资源管理和任务队列监控来优化调度和任务分配。Kubernetes 的细粒度工作队列并行处理通过让多个 Pod 持续消费队列中的任务，减少 Pod 启动次数，提高资源利用效率，适合大量小任务的批量并行处理需求。
+
+Kubernates Indexed Job是一种用于并行处理的作业，它通过为Job中的每个Pod分配一个唯一的索引来实现。每个Pod都可以根据这个索引来处理总任务中不同的部分。这种Job类型特别适用于那些可以被分解为更小的、独立的子任务的工作负载，例如视频渲染、图像处理、机器学习训练和数据处理。控制平面自动为每个Pod设置一个索引编号，使得每个Pod能够识别出要处理的任务部分。。每个Pod基于其索引被静态地分配一部分工作。在Job的spec中设置 completionMode为Indexed，以启用索引Job模式。在JOB_COMPLETION_INDEX环境变量中公开索引，方便容器化的任务进程获取索引。Indexed Job示例：
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: 'sample-job'
+spec:
+  completions: 3  # 决定了Job总共创建多少个Pod
+  parallelism: 3  # 决定了可以同时运行多少个Pod
+  completionMode: Indexed
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - command:
+            - 'bash'
+            - '-c'
+            - 'echo "My partition: ${JOB_COMPLETION_INDEX}"'
+          image: 'docker.io/library/bash'
+          name: 'sample-load'
+```
+Indexed Job简化了并行Job的启动过程，每个Worker Pod都可以基于索引静态的分配到数据分区，无需设置队列系统或修改二进制文件，可以设置每个索引的重试限制，而不是整个Job的重试限制。一旦Job完成，Kubernates可以自动清理已完成或失败的Job，以释放资源。
+
+在Kubernates中，Job是一种批处理任务控制器，用于创建一个或多个Pod并确保这些Pod成功完成任务。在某些场景下，Job中创建的多个Pod可能需要相互通信，这时可以通过配置实现Pod到Pod的通信，尤其是在Job的索引完成模式下，利用Pod的主机名进行通信是一种简便而高效的方式。索引完成模式(Indexed completion mode)：在这种模式下，Kubernates会自动为Job创建的每个Pod设置一个确定性的主机名，格式为${jobName}-${completionIndex}，例如example-job-0、example-job-1等。Pod可以通过主机名直接互相访问。而无需通过API服务器查询Pod IP地址，简化了通信过程。为了让Pod主机名能够被DNS解析，必须创建一个无头服务（即clusterIP: None）并通过标签选择器(selector)匹配Job创建的Pod，无头服务不会分配集群IP，而是为每个匹配的Pod创建DNS记录，使Pod可以通过<pod-hostname>.<headless-service-name>的形式互相访问。。在Job的Pod模版中，需要设置subdomain字段为无头服务的名称。这样，Pod的完全限定域名(FQDN)就变成了<pod-hostname>.<headless-service-name>.<namespace>.svc.cluster.local。Pod之间可以通过这个域名进行通信。创建无头服务：
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: headless-svc
+spec:
+  clusterIP: None
+  selector:
+    job-name: example-job
+```
+创建Job：
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: example-job
+spec:
+  completions: 3
+  parallelism: 3
+  completionMode: Indexed
+  template:
+    spec:
+      subdomain: headless-svc
+      restartPolicy: Never
+      containers:
+      - name: example-workload
+        image: bash:latest
+        command:
+        - bash
+        - -c
+        - |
+          for i in 0 1 2
+          do
+            while ! ping -c 1 example-job-${i}.headless-svc; do
+              echo "Waiting to ping pod example-job-${i}.headless-svc..."
+              sleep 1
+            done
+            echo "Successfully pinged pod: example-job-${i}.headless-svc"
+          done
+```
+通过上述配置，Job中的Pod可以通过example-job-0.headless-svc等主机名互相访问，实现Pod-to-Pod通信。适用场景：需要Pod之间互相通信但不希望频繁调用Kubernetes API服务器查询Pod IP的场景。分布式计算、协同处理任务等需要Pod间协调的批处理任务。需要利用Pod主机名进行服务发现和通信的复杂Job工作负载。Kubernetes通过索引完成模式的Job结合无头服务和DNS机制，实现了Job中Pod之间基于主机名的高效通信，简化了分布式任务的设计和实现。
+
+在Kubernates中，扩展并行处理是一种通过模版批量创建多个Job实例来实现并行任务处理的技术。适合将一组独立的任务分发到多个Job并行执行，从而加快整体处理速度。通过一个通用的Job模版，结合人物参数列表，利用模版渲染工具(如sed、Jinja2)生成多个YAML文件，每个Job处理一个具体的任务项。生成的多个Job可以同时提交给Kubernates集群，集群会并行调度多个Pod分别执行不同的任务，实现真正的并行处理。。通过给这些Job统一打标签（如jobgroup=jobexample），可以方便的使用kubectl命令批量查看、监控和管理这些Job及其Pod。任务可以拆分成多个独立子任务，且每个子任务可以独立执行。需要同时处理多个不同数据项或任务单元。适合批量数据处理、文件转换、独立计算任务等。Kubernetes的扩展并行处理模式通过模板扩展批量创建多个Job实例，每个Job处理一个独立任务，实现了批量任务的并行处理。这种方式适合任务明确且相互独立的场景，结合模板工具可以灵活高效地管理大规模并行作业。
+
+在Kubernates中，Pod失败策略(Pod Failure Policy)用于在Job中更细粒度地控制Pod失败的处理方式，区别对待可重试(retriable)和不可重试(no-retriable)的Pod失败，提升资源利用率并减少不必要的Pod重试。Pod失败策略的作用：
+- 区分区别对待可重试(retriable)和不可重试(no-retriable)的Pod失败：根据Pod的容器退出码或Pod状态条件判断失败类型，针对不同失败采取不同的处理动作。
+- 避免无效重试，节省资源：对于不可重试的错误（如软件缺陷导致的特定退出码），可以立即终止整个Job，避免浪费时间和资源重试。
+- 忽略某些Pod中断（如节点抢占、驱逐）：对于因节点调度导致的Pod中断，可以忽略这些失败，不计入重试次数，避免Job因非业务错误失败。
+
+Pod失败策略(Pod Failure Policy)通过Job的.spec.podFailurePolicy字段定义一组规则，每条规则包含条件和对应动作。条件：onExitCodes：基于容器退出码匹配；onPodConditions：基于Pod的状态条件匹配（如DisruptionTarget表示Pod被驱逐等）。动作(action)：FailJob：立即失败整个Job，终止所有Pod；Ignore：忽略该失败，不计入重试次数；FailIndex：仅失败对应索引的Pod（用于索引完成模式）；Count：将失败计入重试次数（默认行为）。
+
+ 针对不可重试错误立即失败Job：
+ ```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: job-pod-failure-policy-failjob
+spec:
+  completions: 8
+  parallelism: 2
+  backoffLimit: 6
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: main
+        image: docker.io/library/bash:5
+        command: ["bash"]
+        args:
+        - -c
+        - echo "Hello world! I'm going to exit with 42 to simulate a software bug." && sleep 30 && exit 42
+  podFailurePolicy:
+    rules:
+    - action: FailJob
+      onExitCodes:
+        containerName: main
+        operator: In
+        values: [42]
+ ```
+ 当容器以退出码42失败时，Job会立即失败并终止，无需等待6次重试，节省时间和资源。
+
+忽略Pod中断不计入重试：
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: job-pod-failure-policy-ignore
+spec:
+  completions: 4
+  parallelism: 2
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: main
+        image: docker.io/library/bash:5
+        command: ["bash"]
+        args:
+        - -c
+        - echo "Hello world! I'm going to exit with 0 (success)." && sleep 90 && exit 0
+  podFailurePolicy:
+    rules:
+    - action: Ignore
+      onPodConditions:
+      - type: DisruptionTarget
+```
+当Pod因节点驱逐等中断失败时，Job会忽略该失败，不增加重试计数，避免因节点调度导致Job失败，保证Job能继续正常执行。
+
+Kubernetes的Pod失败策略(Pod Failure Policy)为Job提供了灵活的失败处理策略：
+- 精准区分不同类型的失败（软件错误、节点中断等）。
+- 对不可重试失败快速失败Job，避免无效重试。
+- 忽略可重试的中断失败，避免Job被误判失败。
+- 结合backoffLimit机制，更高效的利用计算资源，降低成本。
+
+这对于运行大规模批处理任务、在抢占式节点（spot实例）上执行Job等场景尤为重要。
+
+Kubernates的聚合层(Aggregation Layer)是一种用于扩展Kubernates API的机制，允许用户在不修改Kubernates代码的情况下，将额外的第三方或自定义API注册到Kubernates API中，从而通过统一的Kubernates API接口访问这些扩展服务。聚合层(Aggregation Layer)是kube-apiserver进程的一部分，负责将扩展API的请求转发到对应的扩展API server（通常运行在集群内的Pod中）。通过注册一个APIService资源对象，将扩展API挂载到KubernatesAPI路径下，kube-apiserver会代理对应路径的请求到扩展API Server。kube-aggregator模块负责监控所有API Service资源，解析其指向的Service，并对扩展API Server进行负载均衡和反向代理。这种机制支持扩展的API资源能够被kubectl等Kubernates工具访问，并且可以在Kubernetes UI中与核心资源统一展示。Kubernetes 聚合层是实现 API 扩展的核心机制之一，它通过在 kube-apiserver 中代理扩展 API Server 的请求，实现了 API 的统一访问和管理。配置时需要开启 kube-apiserver 的聚合参数，部署扩展 API Server，创建 APIService 资源，并配置相应的安全和权限策略。聚合层适合需要深度集成 Kubernetes 生态的声明式 API 扩展场景。
+
+扩展API Server是一个独立运行的API服务，遵循Kubernetes API设计规范，提供自定义的API资源和业务逻辑。通过聚合层，Kubernetes的主API Server（kube-apiserver）将特定的请求代理到该扩展API Server，实现统一的 API访问入口和权限管理。设置扩展API Server的主要步骤：
+- 确保APIService API已启用：聚合层依赖APIService资源类型，默认启用，但需确认kube-apiserver启用了相关功能（--runtime-config 参数）。
+- 创建NameSpace：在Kubernates集群中创建一个专门的命名空间，用于部署扩展API Server的相关资源。
+- 生成和配置TLS证书：创建一个CA证书，用于签发扩展API Server的服务端证书。生成服务端证书和私钥，证书的CN应为<service-name>.<namespace>.svc，已复核Kubernates服务的DNS规范。将证书与私钥以Secret形式存储在扩展API Server所在的命名空间。
+- 部署扩展API Server：创建Deployment，运行扩展API Server镜像。挂在上述Secret以加载证书，确保扩展API Server支持HTTPS，创建Service暴露扩展API Server，供Kube-apiserver访问。
+- 配置RBAC权限：创建ServiceAccount供扩展API Server使用。创建ClusterRole和ClusterRoleBinding，授予扩展API Server所需权限。绑定system:auth-delegator ClusterRole，允许扩展API Server委托认证决策。绑定extension-apiserver-authentication-reader Role允许访问认证配置ConfigMap。
+- 创建APIService资源注册扩展API：创建APIService对象，制定扩展API Server的服务名称、命名空间、端口和CA证书（base64 编码）。设置API组名(group)、版本(version)、优先级(groupPriorityMinimum和versionPriority)等信息，该资源非命名空间级，直接注册到Kubernates API聚合层。
+- 验证扩展API Server是否正常工作：通过kubectl get apiservice查看扩展API是否已注册切状态为available。使用kubectl get <自定义资源>访问扩展API资源确认请求能正确代理到扩展API Server。
+
+设置扩展API Server是 Kubernetes 生态中实现自定义 API 资源的高级方案，适合需要完整 API 生命周期管理、权限控制和统一访问接口的场景。通过聚合层，扩展 API Server 与 Kubernetes 主 API Server 无缝集成，提供一致的 API 体验和安全保障。配置过程涉及证书管理、RBAC 权限配置、APIService 注册等关键步骤，需要结合集群实际情况谨慎操作。
+
+Kubernates支持同时运行多个调度器，除了默认的kube-scheduler外，还可以部署自定义调度器，根据不同的调度需求为不同的Pod指定不同的调度器，从而实现更灵活和细粒度的调度策略。支持多种调度策略并存，比如为GPU节点设计专用调度器，或者为特定业务场景设计自定义调度逻辑。可以分摊调度负载，提升调度效率和可靠性。允许实验性调度器与默认调度器并行运行，便于测试和迭代。配置多调度器的步骤：
+- 准备调度器镜像：可以使用 Kubernetes 源码中的 kube-scheduler 作为基础，编译并打包成新的调度器镜像，也可以开发自定义调度器逻辑后打包成镜像。
+- 创建调度器配置文件：每个调度器需要独立的配置文件，定义其schedulerName，调度策略（插件、优先级等）：
+```yaml
+apiVersion: kubescheduler.config.k8s.io/v1
+kind: KubeSchedulerConfiguration
+profiles:
+- schedulerName: my-scheduler
+  # 自定义插件和策略配置
+leaderElection:
+  leaderElect: false
+```
+- 部署调度器：通过Deployment方式在集群中运行调度器Pod，确保每个调度器使用不同的ServiceAccount并绑定相应的ClusterRole权限（通常绑定system:kube-scheduler角色）示例中会挂载配置文件并通过 --config参数传入。
+- 禁用或配置Leader Election：多调度器同时运行时，通常禁用Leader Election(--leader-elect=false)，避免调度器之间竞选冲突。也可以根据需求配置Leader Election以保证高可用。
+- Pod指定调度器：在Pod的YAML中通过spec.schedulerName字段指定使用哪个调度器，例如：如果不指定，使用默认调度器。
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gpu-pod
+spec:
+  schedulerName: my-gpu-scheduler
+  containers:
+  - name: gpu-container
+    image: gpu-app
+```
+- 验证调度器运行状态：使用kubectl get pods -n kube-system查看调度器Pod是否正常运行，使用kubectl get apiservice等命令确认调度器配置是否生效。
+
+每个调度器必须有唯一的schedulerName。调度器需要有足够权限（通过RBAC）访问集群资源。配置文件和启动参数要正确传递，确保调度器能识别自己的名字和策略。多调度器运行时，Pod必须显式指定schedulerName才能由对应调度器处理。Kubernates通过支持多调度器机制，极大增强了调度的灵活性和扩展性。用户可以根据不同业务需求，部署多个调度器实例，定制调度策略，实现更精准的资源分配和调度优化。配置流程包括准备调度器镜像，编写配置文件，部署调度器，配置权限和在Pod中指定调度器名称，最终实现多调度器并行工作。
+
+在Kubernetes中，使用HTTP代理访问Kubernetes API是一种方便的方式，允许用户通过本地代理服务器安全地访问集群的API，而无需直接暴露API Server的地址和证书细节。通过kubectl proxy命令启动一个本地代理服务器。代理所有对Kubernates API Server，用户可以通过访问本地代理地址（如http://localhost:8080）来访问Kubernates API。支持浏览器、curl、wget等多种客户端访问方式。具体使用步骤：
+- 启动代理服务器：运行命令，kubectl proxy --port=8080，这将在本地启动一个HTTP代理服务器，默认监听8080端口。
+- 访问Kubernates API：代理启动后，可以通过以下方式访问API。获取API版本：curl http://localhost:8080/api/，获取默认命名空间下的Pod列表：curl http://localhost:8080/api/v1/namespaces/default/pods
+
+代理服务器默认只监听本地回环地址，确保安全。代理请求继承启动kubectl用户的认证信息，保证访问权限。适合开发和调试环境，生产环境通常通过kubeconfig和直接访问API Server。使用kubectl proxy启动HTTP代理是一种简单快捷的访问Kubernates API方式，适合本地调试和开发。他通过本地代理服务器，安全地转发请求到Kubernates API Server，支持多种客户端访问，简化了认证和访问流程。
+
+当Kubernates集群的API服务器没有直接对外开放，或者需要通过堡垒机等中间服务器访问时，可以利用SOCKS5代理来实现安全访问。这里常用的SSH隧道创建SOCKS5代理，将本地客户端与远程Kubernates API服务器之间的流量通过加密通道转发。在本地客户端执行如下命令，创建一个SOCKS5代理端口（默认端口为1080）。ssh -D 1080 -q -N username@kubernetes-remote-server.example。-D 1080：在本地打开一个 SOCKS5 代理端口1080。-q：安静模式，抑制警告信息。-N：不执行远程命令，仅做端口转发。username@kubernetes-remote-server.example：远程 SSH 服务器地址，通常是集群所在的堡垒机。此命令会在本地启动一个SOCKS5代理，所有通过该端口的流量都会通过SSH隧道转发到远程服务器。如果需要在 Kubernetes 集群内部访问服务或 Pod，也可以使用专门的 kubectl 插件创建 SOCKS5 代理 Pod，实现本地端口转发访问集群内部资源。
+
+Konnectivity服务是Kubernates控制平面与集群节点之间通信的TCP代理，主要用于解决控制平面访问集群网络时的网络连接问题。尤其是在复杂网络环境中提高通信的安全性和可靠性。Konnectivity服务由两部分组成：
+- Konnectivity Server：部署在控制平面节点，负责接收来自API Server的请求并转发。
+- Konnectivity Agent：部署在集群节点上，负责与Konnectivity Server建立连接并转发流量到节点本地网络。
+
+它为控制平面提供了一个统一的TCP代理层，支持多种传输方式（如UDS、TCP），并支持TLS加密，确保控制平面和节点之间的安全通信。配置步骤：
+- 创建出口配置文件(Egress)：Konnectivity通过出口选择器(Egress Selector)配置控制API Server的出站流量。内容大致如下：
+```yaml
+apiVersion: apiserver.k8s.io/v1beta1
+kind: EgressSelectorConfiguration
+egressSelections:
+- name: cluster
+  connection:
+    proxyProtocol: GRPC
+  transport:
+    uds:
+      udsName: /etc/kubernetes/konnectivity-server/konnectivity-server.socket
+```
+proxyProtocol支持GRPC和HTTPConnect，通常使用GRPC。传输方式支持uds和tcp，推荐同一台机器上使用uds，跨机器使用tcp并配置TLS。
+- 配置API Server：将API Server的启动参数--egress-selector-config-file，指向上述出口配置文件路径。如果使用UDS，需要为kube-apiserver添加卷挂载，挂载路径与配置文件中的udsName一致。
+```yaml
+volumeMounts:
+- name: konnectivity-uds
+  mountPath: /etc/kubernetes/konnectivity-server
+  readOnly: false
+volumes:
+- name: konnectivity-uds
+  hostPath:
+    path: /etc/kubernetes/konnectivity-server
+    type: DirectoryOrCreate
+```
+- 生成证书和kubeconfig：使用集群的CA证书（如/etc/kubernetes/pki/ca.crt）为Konnectivity Server生成客户端证书和秘钥。创建Konnectivity Server的kubeconfig文件，配置访问集群的凭证和证书。
+- 部署Konnectivity Server：在控制平面节点部署Konnectivity Server通常以静态Pod形式运行，或者使用DaemonSet。服务器配置示例中包含必要的证书挂载、卷挂载、端口配置，确保与出口配置文件一致。
+- 部署Konnectivity Agent：在集群所有节点部署Konnectivity Agent，通常以DaemonSet形式运行，Agent负责与Konnectivity Server建立连接，转发流量。配置中需要指定Konnectivity Server的地址和端口，使用服务账号Token进行身份验证。
+- 配置RBAC权限：如果集群启用了RBAC，需要为Konnectivity Server和Agent创建相应的角色并绑定，确保他们有权限访问所需资源。
+
+Konnectivity服务通过在控制平面和集群节点之间建立安全的TCP代理通道，解决了控制平面访问节点网络的复杂性，提升了集群的网络安全和稳定性。其核心流程包括配置出口选择器、生成证书、配置API Server、部署Konnectivity Server、Konnectivity Agent以及配置权限控制。
+
+Kubernates中通过自定义资源定义(CustomResourceDefinition)来扩展Kubernates API，是一种无需修改Kubernates源码即可新增自定义资源类型的机制。它允许用户将自己的业务逻辑抽象为Kubernates原生资源，实现与内置资源（如Pod）相同的声明式管理体验。自定义资源定义(CustomResourceDefinition)是Kubernates的一种扩展机制，定义了新的资源类型(Custom Resource)。创建自定义资源定义(CustomResourceDefinition)后，Kubernates API服务器会自动为该自定义资源生成对应的RESTFul API路径，支持对自定义资源的增删改查。自定义资源可以是命名空间作用域(Namespaced)或集群作用域(Cluster)，由自定义资源定义(CustomResourceDefinition)的spec.Scope字段决定。自定义资源定义(CustomResourceDefinition)本身是非命名空间资源，在所有命名空间中可访问。用户通过YAML文件定义自定义资源定义，指定资源的API组、版本、资源名称、作用域以及资源结构。Kubernates API Server注册该资源类型，提供标准的CRUD接口。自定义资源的数据存储在ETCD，享有Kubernates的强一致性保障。用户可以通过kubectl等工具箱操作内置资源一样操作自定义资源。结合自定义控制器，可以对自定义资源的状态变化作出响应，实现业务逻辑自动化。
+```yaml
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: crontabs.stable.example.com  # 格式为 <复数名>.<组名>
+spec:
+  group: stable.example.com          # API 组名
+  versions:
+    - name: v1
+      served: true                   # 是否启用该版本API
+      storage: true                  # 是否为存储版本
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                cronSpec:
+                  type: string
+                image:
+                  type: string
+                replicas:
+                  type: integer
+  scope: Namespaced                  # 资源作用域：Namespaced 或 Cluster
+  names:
+    plural: crontabs                 # 资源复数名，用于API路径
+    singular: crontab                # 资源单数名，CLI使用
+    kind: CronTab                    # 资源类型名，通常为驼峰式单数
+    shortNames:
+      - ct                           # 命令行简写
+```
+自定义资源定义(CustomResourceDefinition)的优势：
+- 定制资源类型：满足特定业务需求，定义符合自己业务模型的资源。
+- 统一管理：自定义资源纳入了Kubernates统一管理体系，使用相同的工具和流程。
+- 无需改动核心代码：通过自定义资源定义(CustomResourceDefinition)扩展API，无需开发和维护独立的API Server。
+- 与生态系统集成：支持Helm、kubectl等工具，方便部署和管理。
+- 支持声明式管理和事件驱动：结合自定义控制器，实现自动化运维和业务逻辑。
+
+自定义资源定义(CustomResourceDefinition)应用场景：管理外部系统和业务对象，如日志采集配置、数据库实例等。对Kubernates资源进行更高层次抽象，如自定义网络策略、调度策略。实现Operator模式自动化管理复杂应用生命周期。Kubernates通过自定义资源定义(CustomResourceDefinition)提供了一种强大且灵活的机制，允许用户扩展Kubernates API，定义符合自身业务需求的资源类型。实现与内置资源同样的管理体验和生态兼容性。
+
+Kubernates中的守护进程集(DaemonSet)是一种控制器，用于确保在集群中的每个节点上都运行一个特定的Pod副本。它适合于需要在所有节点上运行相同服务的场景，比如日志收集、监控代理、网络代理等。守护进程集(DaemonSet)会在集群中的每个节点上自动创建一个Pod，保证节点新增时自动创建，节点移除时自动删除对应的Pod。常见于运行存储服务、收集日志、监控服务等。Deployment可以在一个节点上运行多个副本，而守护进程集(DaemonSet)在节点上最多只能运行一个副本。构建守护进程集(DaemonSet)示例：
+```yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: example-daemonset
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: example
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: example
+    spec:
+      containers:
+      - name: pause
+        image: registry.k8s.io/pause
+      initContainers:
+      - name: log-machine-id
+        image: busybox:1.37
+        command: ['sh', '-c', 'cat /etc/machine-id > /var/log/machine-id.log']
+        volumeMounts:
+        - name: machine-id
+          mountPath: /etc/machine-id
+          readOnly: true
+        - name: log-dir
+          mountPath: /var/log
+      volumes:
+      - name: machine-id
+        hostPath:
+          path: /etc/machine-id
+          type: File
+      - name: log-dir
+        hostPath:
+          path: /var/log
+```
+这个守护进程集(DaemonSet)会在每个节点上运行一个Pod，该Pod包含：一个Init容器，负责从主机的/etc/machine-id文件读取内容并写入日志目录/var/log/machine-id.log。一个主容器是pause容器，用于保持Pod运行状态。创建命令示例：kubectl apply -f https://k8s.io/examples/application/basic-daemonset.yaml，创建后，可以通过以下命令验证每个节点上是否运行了Pod：kubectl get pods -o wide，查看日志内容：kubectl exec <pod-name> -- cat /var/log/machine-id.log。其中<pod-name>是某个DaemonSet Pod的名称。主要步骤：
+- 准备Kubernetes集群，至少包含两个节点。
+- 编写DaemonSet YAML文件，定义Pod模板和选择器。
+- 使用kubectl创建DaemonSet。
+- 验证DaemonSet Pod是否在每个节点上运行。
+- 监控和管理DaemonSet，根据需要调整配置。
+
+DaemonSet Pod可以通过NodeSelector或亲和性规则限制只在特定节点上运行。DaemonSet会自动容忍一些节点污点，保证Pod调度。适用场景：日志收集（如Fluentd）、节点监控（如Prometheus Node Exporter）、网络代理或网络插件（如Calico）、存储服务（如GlusterFS、Ceph）。DaemonSet是Kubernetes中非常重要的控制器，适合运行需要在每个节点上持续存在的服务，保证集群节点的统一性和功能完整性。
+
+在Kubernates中，对DaemonSet执行滚动更新(Rolling Update)是一种平滑升级Pod的方式，确保在更新过程中每个节点做多只有一个DaemonSet Pod运行，从而避免服务中断。DaemonSet更新策略：
+- OnDelete：更新DaemonSet模板后，新的Pod只有在手动删除旧Pod后才会自动创建。
+- RollingUpdate（默认策略）：这种策略下，更新DaemonSet模版后，旧的Pod会被自动终止，并以受控方式自动创建新的Pod，整个过程中每个节点上最多只有一个Pod在运行，保证了服务的连续性。
+
+启用滚动更新(Rolling Update)：必须在DaemonSet的YAML文件中设置：
+```yaml
+spec:
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1  # 可选，默认是1，表示更新时最多允许多少Pod不可用
+```
+.spec.updateStrategy.type设置为RollingUpdate，.spec.updateStrategy.rollingUpdate.maxUnavailable控制更新时最多不可用的Pod数量，默认是1。还可以设置.spec.minReadySeconds（Pod启动后等待多少秒才算准备就绪，默认为0）和.spec.updateStrategy.rollingUpdate.maxSurge（默认为0，表示更新时不额外创建Pod）。
+
+滚动更新(Rolling Update)执行步骤：
+- 确认更新策略：使用命令检查DaemonSet的更新策略是否为RollingUpdate：kubectl get ds <daemonset-name> -o go-template='{{.spec.updateStrategy.type}}{{"\n"}}'。
+- 应用更新：使用kubectl apply -f <daemonset.yaml>应用更新。
+- 观察更新过程：通过kubectl get pods -w 观察Pod滚动替换状态，确保新Pod按节点逐个替换旧Pod。
+
+```yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: fluentd-elasticsearch
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      name: fluentd-elasticsearch
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+  template:
+    metadata:
+      labels:
+        name: fluentd-elasticsearch
+    spec:
+      containers:
+      - name: fluentd-elasticsearch
+        image: quay.io/fluentd_elasticsearch/fluentd:v2.5.2
+        ...
+```
+
+滚动更新(Rolling Update)是DaemonSet默认且推荐的更新方式，能保证更新过程中的服务连续性。通过修改DaemonSet的Pod模版并应用更新，Kubernates会自动按节点顺序替换Pod。可以通过调整maxUnavailable、minReadySeconds等参数来控制更新的速度和稳定性。DaemonSet的滚动更新既保证了集群中每个节点都有对应的Pod，又能平滑地完成版本升级，避免服务中断。
+
+在Kubernates中，对DaemonSet执行回滚(Rollback)，是指将aemonSet恢复到之前的某个版本，已撤销最近的更新操作，常用于当滚动更新出现问题时回溯恢复到稳定的状态。Kubernates会为DaemonSet维护历史版本(Revision)，每次更新DaemonSet时都会生成一个新的修订版本。通过回滚操作，可以将DaemonSet恢复到之前的某个修订版本。回滚过程是异步进行的，Kubernates控制平面会逐步替换Pod，保证服务的连续性。DaemonSet回滚的步骤：
+- 查看DaemonSet的历史版本：kubectl rollout history daemonset <daemonset-name>。如果想查看某个具体版本的详细信息：kubectl rollout history daemonset <daemonset-name> --revision=1。
+- 执行回滚操作：将DaemonSet回滚到指定的版本，kubectl rollout undo daemonset <daemonset-name> --to-revision=<revision>。
+- 观察回滚进度：回滚是异步进行的，可以通过以下命令观察回滚状态，kubectl rollout status ds/<daemonset-name>。
+
+回滚前建议确认目标版本号，避免误回滚。回滚操作只影响DaemonSet资源本身，相关的ConfigMap、Secret等其他资源需要单独管理。回滚时，DaemonSet会按照滚动更新策略逐步替换Pod，保证服务不中断。DaemonSet的回滚流程主要包括查看历史版本、执行回滚命令和监控回滚状态。通过kubectl rollout undo daemonset命令，可以方便地将DaemonSet恢复到之前的稳定版本，快速应对更新失败或异常情况，保障集群服务的稳定运行。
+
+在Kubernates中，如果你想让Pod运行在集群中的部分节点上，而不是所有节点，可以通过给节点打标签，并在Pod或DaemonSet上使用节点选择器(nodeSelector)或节点亲和性(nodeAffinity)来实现。在部分节点上运行Pod：
+- 给节点打标签：给运行Pod的节点打上特定标签，例如：kubectl label nodes node1 disktype=ssd，kubectl label nodes node2 disktype=ssd。这样，只有带有disktype=ssd标签的节点会被选中。
+- 在DaemonSet中使用nodeSelector：在DaemonSet的Pod模板中添加nodeSelector字段，指定只在带有特定标签的节点上运行Pod。
+```yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nginx-fast-storage
+spec:
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      nodeSelector:
+        disktype: ssd
+      containers:
+      - name: nginx
+        image: nginx:1.10.0
+```
+这样，DaemonSet只会在带有disktype = ssd标签的节点上创建Pod，而不会在其他节点上运行。
+- 使用nodeAffinity：nodeAffinity提供了比nodeSelector更丰富的调度规则，比如支持集合操作、优先级等。示例：
+```yaml
+spec:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: disktype
+            operator: In
+            values:
+            - ssd
+```
+这表示Pod只能调度到带有disktype=ssd标签的节点上。
+
+DaemonSet会忽略节点的unschedulable状态，确保符合条件的节点都会运行对应的Pod。当节点标签发生变化时，DaemonSet会自动在新匹配的节点上创建Pod，并在不匹配的节点上删除Pod。通过给节点打标签和配置DaemonSet的节点选择，可以实现有针对性的服务部署，比如只带有高速SSD的节点上运行日志收集器或缓存服务。要让Kubernates的Pod只运行在部分节点上。这种方式灵活且高效，适用于需要针对特定硬件或节点特性的服务部署场景。
+
+在Kubernates中，当DNS配置不合理或无法满足需求时可以通过向Pod的/etc/hosts 文件添加自定义条目，实现对主机名解析的覆盖。这种做法可以在Pod级别灵活控制主机名解析，避免依赖集群DNS服务。HostAliases是Kubernates Pod规范中的一个字段，允许用户为Pod的/etc/hosts 文件添加额外的IP和主机名映射条目，Kubelet会在Pod启动时自动将这些条目写入到每个容器的/etc/hosts 文件中。适用场景：DNS 配置不合理或无法修改时。需要临时覆盖某些主机名的解析。需要为Pod内部应用指定特定的主机名-IP映射。HostAliases的Pod YAML示例：
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hostaliases-pod
+spec:
+  restartPolicy: Never
+  hostAliases:
+  - ip: "127.0.0.1"
+    hostnames:
+    - "foo.local"
+    - "bar.local"
+  - ip: "10.1.2.3"
+    hostnames:
+    - "foo.remote"
+    - "bar.remote"
+  containers:
+  - name: cat-hosts
+    image: busybox:1.28
+    command: ["cat"]
+    args: ["/etc/hosts"]
+```
+这个配置会在Pod的/etc/hosts 文件中添加如下条目：127.0.0.1 foo.local bar.local、10.1.2.3 foo.remote bar.remote。/etc/hosts 文件由kubelet管理，任何手动修改都会在Pod重启或重新调度时被覆盖，因此推荐使用HostAliases字段进行配置。HostAliases配置只影响对应的Pod，不会影响集群中其他Pod。启用了hostNetwork的Pod无法使用HostAliases功能。相比使用Init容器或脚本修改/etc/hosts，HostAliases更加简洁和稳定。使用步骤：
+- 编写包含hostAliases字段的Pod YAML 文件。
+- 使用kubectl create -f 或kubectl apply -f 创建Pod。
+- 通过kubectl exec 或查看容器日志，验证/etc/hosts 文件中是否包含自定义条目。
+
+HostAliases是Kubernetes提供的官方推荐方式，用于向Pod的/etc/hosts 文件添加自定义主机名解析条目，适用于DNS配置不合理时的场景，且由kubelet管理，保证了配置的稳定性和持久性。
+
+在Kubernates中的Service IP范围(Service CIDR)决定了集群中的Service（如ClusterIP类型服务）可用的虚拟IP地址池。随着集群规模扩大，默认的Service IP范围可能不足，导致无法为新Service分配唯一IP。为解决这一问题，Kubernates提供了扩展Service IP范围(Extend Service IP Ranges)功能。通过启用kube-apiserver的MultiCIDRServiceAllocator特性门控，可以再集群中创建多个ServiceCIDR对象，从而扩展或新增Service IP地址段，增加可用的Service IP数量。Kubernates会创建一个名为kubernates的ServiceCIDR对象，反映当前集群的Service IP范围。扩展时，可以新增额外的ServiceCIDR来扩展IP地址池，保证新创建的SService可以从新的范围中分配IP。所有kube-apiserver实例必须使用相同的--service-cluster-ip-range参数配置，确保Service IP范围一致。Kubernates会根据Service CIDR大小，自动划分动态或静态IP分配区间，避免IP冲突。例如，CIDR较大时，静态分配区间和动态分配区间会分别划分，动态分配优先使用上层区间，静态分配使用下层区间。应用场景：集群规模扩大，需要更多的Service IP。避免与已有网络IP冲突，通过新增CIDR来扩展，解决原有Service IP耗尽的问题。Kubernetes通过支持多ServiceCIDR的方式，实现了Service IP地址范围的动态扩展，解决了大规模集群中Service IP不足的问题，提升了集群网络的灵活性和可扩展性。
+
+重新配置默认Service CIDR的挑战：
+- 已有Service IP不兼容：直接更改--service-cluster-ip-range会导致之前分配的Service IP与新的CIDR不匹配，可能导致网络通信失败。
+- 需要重建集群或迁移：通常需要删除所有Service，或者重建集群，才能安全更改默认Service CIDR。
+- 控制器管理：Kubernates中有专门的DefaultServiceCIDR Controller负责管理默认的ServiceCIDR对象，确保其与kube-apiserver参数一致，并在单栈到双栈升级时支持自动更新。
+
+Service CIDR重新配置步骤：
+- 规划新的Service CIDR，确保与Pod CIDR和集群网络不冲突。
+- 备份现有集群配置和数据。
+- 删除所有现有Service，避免IP冲突。
+- 修改kube-apiserver的--service-cluster-ip-range 参数，更新为新的CIDR。
+- 重启kube-apiserver及相关组件，是配置生效。
+- 重新创建Service，使用新的IP范围。
+- 验证网络连通性和Service功能正常。
+
+如果是较新版本Kubernetes，可以考虑使用ServiceCIDR资源和多CIDR功能，配合DefaultServiceCIDR Controller实现更平滑的切换和扩展。Kubernates默认Service CIDR是通过kube-apiserver参数配置的，重新配置时需谨慎操作，避免IP冲突和服务中断。新版本提供了Service CIDR资源和控制器支持，提升了管理灵活性，单核心原则仍是规划合理的CIDR并确保集群网络一致性。
+
+Kubernates的IPv4/IPv6双协议栈允许集群同时支持IPv4和IPv6地址，为Pod和Service分配双栈IP，从而提升网络灵活性和兼容性。验证双鞋驿站功能是否正常启用和配置正确，是确保集群网络稳定运行的重要步骤。验证IPv4/IPv6双协议栈：
+- 验证节点是否分配了双栈Pod地址范围：每个启用双协议栈的节点应分配一个IPv4子网和一个IPv6子网，用于Pod的IP分配。可以通过以下命令查看指定节点的Pod CIDR。kubectl get nodes <节点名称> -o go-template --template='{{range .spec.podCIDRs}}{{printf "%s\n" .}}{{end}}'。
+- 验证节点是否有IPv4和IPv6的内部IP地址：确认节点本身网络接口支持双协议栈，可以查看节点的地址信息。kubectl get nodes <节点名称> -o go-template --template='{{range .status.addresses}}{{printf "%s: %s\n" .type .address}}{{end}}'。
+- 验证双协议栈Service的创建和IP分配：创建一个支持双栈的 Service，示例如下：
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-service
+  labels:
+    app.kubernetes.io/name: MyApp
+spec:
+  ipFamilyPolicy: PreferDualStack
+  ipFamilies:
+  - IPv6
+  - IPv4
+  type: LoadBalancer
+  selector:
+    app.kubernetes.io/name: MyApp
+  ports:
+  - protocol: TCP
+    port: 80
+```
+然后通过命令查看Service：kubectl get svc -l app.kubernetes.io/name=MyApp，应看到Service同时分配了IPv6和IPv4的ClusterIP和（如果支持）外部负载均衡IP。
+- 版本和环境要求：Kubernetes版本建议1.23及以上，双协议栈功能从v1.21开始默认启用，v1.23稳定支持。云提供商或网络插件必须支持双协议栈网络。节点必须具备可路由的IPv4和IPv6网络接口。
+
+验证Kubernetes IPv4/IPv6双协议栈主要包括：确认节点分配了IPv4和IPv6 Pod CIDR。确认节点有对应的IPv4和IPv6 内部IP。创建支持双栈的Service，验证其同时获得IPv4和IPv6地址。确保Kubernetes版本和网络环境支持双协议栈。通过以上步骤，可以有效确认双协议栈功能是否正常启用和运行，保障集群网络的双栈兼容性和高可用性。
+
+Kubernates支持在Pod中使用大页内存(HugePages)，以提升高性能计算和内存密集型应用的效率。HugePages能减少页表压力，提高内存访问性能，适用于数据库、缓存等场景。Linux内核支持的物理内存大页机制，常见大小为2MiB、1GiB，远大于默认的4KiB，适合大内存场景，内核自动管理的透明大页，Kubernates及支持显示分配的HugePages。节点预分配HugePages：在Kubernates节点上，必须提前为操作系统分配HugePages，节点才能向集群报告期HugePages的容量。分配方式如下：编辑/etc/default/grub，添加类似如下参数：GRUB_CMDLINE_LINUX="hugepagesz=1G hugepages=2 hugepagesz=2M hugepages=512"。这表示分配2个1GiB和512个2MiB的大页。更新 grub并重启节点后，Kubernetes会自动发现并上报所有HugePages资源。HugePages资源管理与Pod配置：HugePages作为调度资源暴露，资源名为hugepages-<size>，如hugepages-2Mi、hugepages-1Gi。在Pod的resources.limits中声明需要的HugePages数量，单位可为Mi、Gi等。HugePages不支持overcommit（超量分配），请求值必须等于限制值。
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: huge-pages-example
+spec:
+  containers:
+  - name: example
+    image: fedora:latest
+    command: ["sleep", "inf"]
+    resources:
+      limits:
+        hugepages-2Mi: 100Mi
+        hugepages-1Gi: 2Gi
+        memory: 100Mi
+      requests:
+        memory: 100Mi
+    volumeMounts:
+    - mountPath: /hugepages-2Mi
+      name: hugepage-2mi
+    - mountPath: /hugepages-1Gi
+      name: hugepage-1gi
+  volumes:
+  - name: hugepage-2mi
+    emptyDir:
+      medium: HugePages-2Mi
+  - name: hugepage-1gi
+    emptyDir:
+      medium: HugePages-1Gi
+```
+上述配置会为容器分配100Mi的2Mi BHugePages和2Gi的1GiB HugePages，并挂载到指定目录。必须同时声明CPU或内存资源，单独声明HugePages无效。EmptyDir卷可用于挂载HugePages，挂载数量不能超过Pod请求的 HugePages数量。通过ResourceQuota可对命名空间内HugePages资源进行配额限制。应用如需通过shmget()使用HugePages，需运行在与/proc/sys/vm/hugetlb_shm_group匹配的补充组下。查看节点HugePages状态：kubectl describe node <node-name>。可在Capacity和Allocatable字段看到hugepages-2Mi、hugepages-1Gi等资源。适用场景：高性能数据库、缓存等对内存访问效率要求高的应用。需要减少页表压力、提升大规模内存管理性能的场景。Kubernetes HugePages管理为内存密集型应用提供了高效的内存分配方式。节点需预分配大页，Pod通过资源声明使用，适合高性能场景。配置时需要资源声明规范和系数参数设置。
+
+Kubernates支持通过设备插件(Device Plugin)机制管理和调度GPU，目前对NVIDIA和AMD GPU提供稳定支持。GPU调度的基本原理：
+- 设备插件：Kubernates通过设备插件框架，让节点上的GPU资源暴露给集群。管理员需要在节点上安装对应厂商的GPU驱动和设备插件，插件会将GPU资源注册到kubelet。
+- 资源名称：GPU资源以自定义资源名称出现，如nvidia.com/gpu或amd.com/gpu。
+- 资源请求方式：在Pod的容器资源限制(resources.limits)中声明需要的GPU数量，例如：
+```yaml
+resources:
+  limits:
+    nvidia.com/gpu: 1
+```
+Kubernates会将该请求视为对GPU资源的申请，并调度到具有相应GPU的节点上。GPU只能在limits中声明，且requests和limits必须相等或只声明limits，因为Kubernates会将limits作为默认的requests。不能只声明requests而不声明limits。调度策略：
+- 节点亲和性(Node Affinity)：可以通过节点标签和亲和性规则，将GPU工作负载调度到特定支持GPU的节点。
+- 污点和容忍(Taints and Tolerations)：GPU节点通常会打污点，确保只有请求GPU的Pod能调度到这些节点。
+
+管理配有不同类型GPU的集群，如果集群内部的不同节点上有不同类型的NVIDIA GPU，那你可以使用节点标签和节点选择器来将Pod调度的合适的节点上。
+```bash
+# 为你的节点加上它们所拥有的加速器类型的标签
+kubectl label nodes node1 accelerator=example-gpu-x100
+kubectl label nodes node2 accelerator=other-gpu-k915
+```
+自动节点标签：可以部署Kubernates Node Feature Discovery(NFD)来自动发现所有启用GPU的节点并为其打标签。NFD检测Kubernates集群中每个节点上可用的硬件特性。通常，NFD被配置为节点标签，，但NFD也可以添加扩展资源、注解和节点污点。NFD会默认为检测到的特性创建特性标签。管理员可以利用NFD对具有某些特性额节点添加污点，以便只有请求这些特性的Pod可以被调度到这些节点上。这里需要一个NFD插件，将适当的标签添加到节点上。这些标签可以是通用的，也可以是供应商特定的。GPU供应商可能会为NFD提供插件。
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: example-vector-add
+spec:
+  restartPolicy: OnFailure
+  # 你可以使用Kubernetes节点亲和性将此Pod调度到提供其容器所需的那种GPU的节点上
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: "gpu.gpu-vendor.example/installed-memory"
+            operator: Gt #（大于）
+            values: ["40535"]
+          - key: "feature.node.kubernetes.io/pci-10.present" # NFD特性标签
+            values: ["true"]                                 #（可选）仅调度到具有PCI设备10的节点上
+  containers:
+    - name: example-vector-add
+      image: "registry.example/example-vector-add:v42"
+      resources:
+        limits:
+          gpu-vendor.example/example-gpu: 1                  # 请求1个GPU
+```
+
+使用流程：
+- 在GPU节点安装对应厂商的GPU驱动和设备插件。
+- 节点启动后，设备插件向kubelet报告GPU资源。
+- 用户在Pod配置中声明GPU资源需求。
+- Kubernetes调度器根据资源请求和节点可用GPU，调度Pod到合适节点。
+
+核心功能：
+- GPU时间片(Time-Slicing)：通过NVIDIA GPU Operator等工具支持GPU资源的时间片共享，提高GPU利用率。
+- GPU共享调度：社区和厂商提供基于Kubernetes的GPU共享调度扩展，支持多容器共享同一GPU，提升资源利用。
+- GPU监控与管理：结合Prometheus等监控工具，实时监控GPU使用率，辅助调度决策。
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gpu-pod
+spec:
+  containers:
+  - name: gpu-container
+    image: nvidia/cuda:11.0-base
+    resources:
+      limits:
+        nvidia.com/gpu: 1
+```
+
+综上，Kubernetes通过设备插件机制实现对GPU资源的管理和调度，用户只需在Pod配置中声明GPU资源限制，集群即可将工作负载调度到具备GPU的节点上，满足AI、机器学习、高性能计算等场景的需求。
 
 
 
 - 基于Kubernetes的机器学习工作负载：Kubeflow
-- 基于Kubernetes的无服务器环境：Apache OpenWhisk、Fission、Kubeless、nuclio和OpenFaaS
+- 基于Kubernetes的无服务器环境：Apache OpenWhisk、Fission、Kubeless、nuclio、OpenFaaS
 - 基于Kubernetes构建的数据平台：Iguazio（数据流式分析）
 - 基于Kubernates的网络插件：Cilium、Flannel、Calico
+- 基于Kubernates的边缘计算：KubeEdge
+
+超级对齐(superalignment)、可扩展监督(Scalable Oversight) ？
+
+
+ServerRunOptions：在Kubernates中，ServerRunOptions是一个结构体，包含了运行通用API服务器时的各种配置选项。
+
+controlplaneapiserver.Options：是用于配置和启动API Server控制平面的关键结构体，主要用于封装API Server的各种运行参数和配置信息。controlplaneapiserver.Options包含了API Server启动时所需的各种配置信息。
+- Flagz(flagz.Reader)：Flagz是Kubernates及其相关组件中用于读取和管理命令行参数的接口或类型，主要用于调试和动态查看程序运行时的标志参数状态。flagz.Reader作为一个接口或类型，提供读取程序中定义的命令行参数的能力，方便在运行时通过HTTP接口查看当前的flag设置。在Kubernetes组件（如kube-scheduler）中，flagz.Reader通常被用来配合flagz包，通过注册到HTTP路由中，暴露一个接口供用户查询程序启动时的所有flag及其当前值，便于调试和运维。例如，在kube-scheduler的源码中，flagz.Reader被传入用于创建健康检查和调试相关的HTTP Handler，配合flagz.Install方法将flag信息暴露出来。flagz.Reader是Kubernates组件用于读取和暴露命令行参数状态的接口。它配合flagz包使用，支持通过HTTP接口查看程序的flag配置，方便调试和监控。
+- Etcd *genericoptions.EtcdOptions：ETCD存储相关配置，定义如何连接和访问ETCD。
+- SecureServing *genericoptions.SecureServingOptionsWithLoopback：安全服务配置，主要是TLS证书和HTTPS监听端口。
+- Audit *genericoptions.AuditOptions：审计日志配置。
+- Features *genericoptions.FeatureOptions：特性开关配置。
+- Admission *kubeoptions.AdmissionOptions：准入控制插件配置。
+- Authentication *kubeoptions.BuiltInAuthenticationOptions：认证配置，是Kubernates API Server中用于配置内置认证机制的结构体，封装了多种常见的认证方式及其相关配置参数。包括匿名认证、启动引导令牌认证、客户端证书认证、OIDC、请求头认证、服务账户认证、Token文件认证和Webhook认证等。
+- kubeoptions.BuiltInAuthorizationOptions：授权配置，是Kubernates API Server中用于配置内置授权(Authorization)机制的结构体。封装了Kubernates支持的多种授权模式(AlwaysAllow、RBAC、Node、Webhook等)及其参数。默认授权模式为AlwaysAllow，即默认允许所有操作，方便开发和测试。配置Webhook授权缓存和重试回退策略来提升性能和稳定性。可以通过命令行参数支持灵活配置。
+```go
+type BuiltInAuthorizationOptions struct {
+	Modes                       []string           //授权模式列表，支持多种模式组合，执行顺序决定了授权决策流程，常见模式有AlwaysAllow、RBAC、Node、Webhook等
+	PolicyFile                  string
+	WebhookConfigFile           string
+	WebhookVersion              string             //Webhook 模式使用的API版本。，默认"v1beta1"
+	WebhookCacheAuthorizedTTL   time.Duration      //授权成功结果缓存时间，默认5分钟
+	WebhookCacheUnauthorizedTTL time.Duration      //授权失败结果缓存时间，默认30秒
+	WebhookRetryBackoff *wait.Backoff              //Webhook 授权请求重试的退避策略，保障授权请求的稳定性
+	AuthorizationConfigurationFile string
+	AreLegacyFlagsSet func() bool
+}
+```
+- genericoptions.APIEnablementOptions：适用于控制API资源启用和禁用的配置选项。它主要包含一个RuntimeConfig字段，用于动态设置哪些API组或版本应该被开启或关闭。它允许用户通过命令行参数或配置文件，灵活控制 Kubernetes API Server中哪些API资源是可用的。这对于定制API Server行为，或者在聚合式API Server中只启用部分API非常有用。
+- genericoptions.EgressSelectorOptions：是Kubernates API Server中用于控制其出站流量(Egress Traffic)的配置选项。这个选项主要负责管理API Server如何连接到集群内部或外部的服务，尤其是通过Konnectivity服务进行连接。它的核心作用是指导API Server的出站连接行为。在某些网络拓扑中，API Server可能无法直接访问集群内部的其他组件（如kubelet、etcd等），或者出于安全考虑，需要将所有出站流量通过一个代理（如 Konnectivity服务）进行路由。EgressSelectorOptions允许管理员指定哪些类型的请求（例如，对kubelet请求、对ETCD的请求等）应该通过何种方式（例如，直接连接、通过Konnectivity服务）发送，如果此选项未配置，API Server将尝试直接通过网络连接目标服务。
+- Metrics *metrics.Options：适用于配置和管理Metric Server的选项结构体，主要负责控制Metrics Server的启动参数和行为。Metrics Server是Kubernetes集群中的一个核心组件，负责收集各节点和Pod的CPU、内存等资源使用指标，并通过Metrics API暴露这些数据，供Horizontal Pod Autoscaler (HPA)、Vertical Pod Autoscaler(VPA)和kubectl top命令等使用。metrics.Options主要用于配置Metrics Server的运行参数，包括但不限于：监听端口和地址、与kubelet通信的参数（如地址类型、是否跳过TLS验证）、资源请求和限制、日志级别和输出、授权认证相关配置。
+- Logs *logs.Options：通常是指用于配置和管理API Server或其他组件日志行为的选项结构体，主要负责控制日志的格式、输出、缓冲和性能相关参数。
+- genericoptions.TracingOptions：是Kubernates API Server及其组件用于配置分布式追踪(Tracing)的选项结构体，主要负责启用和管理系统组件的调用链追踪功能，以帮助开发者和运维人员监控请求的执行流程和性能瓶颈。通过TracingOptions，可以为Kubernetes组件（如kube-apiserver、kubelet等）开启基于OpenTelemetry协议的分布式追踪，生成调用链中的跨度(span)，记录请求的延迟和调用关系。支持配置追踪数据的导出端点（例如 OpenTelemetry Collector或Jaeger），包括设置采样率、导出地址、认证信息等，使追踪数据能够被收集和分析。可以设置采样率（如每百万请求采样多少条），平衡追踪数据的详细程度和系统性能开销。Kubernetes生态中常用 Jaeger作为追踪后端，TracingOptions支持与Jaeger Operator配合，方便在集群中部署和管理追踪服务。在kube-apiserver启动参数中通过 --tracing-config-file 指定追踪配置文件，配置示例：
+```yaml
+apiVersion: apiserver.config.k8s.io/v1beta1
+kind: TracingConfiguration
+endpoint: localhost:4317         # OpenTelemetry Collector地址
+samplingRatePerMillion: 100      # 每百万请求采样100条
+```
+在Jaeger Operator中通过参数 --tracing-enabled=true 启用自身操作的追踪，并以sidecar方式部署Jaeger Agent。genericoptions.TracingOptions是Kubernetes控制平面组件中用于启用和配置分布式追踪的核心选项，支持通过OpenTelemetry协议将调用链数据导出到追踪后端（如Jaeger、OpenTelemetry Collector），帮助提升集群的可观测性和故障排查能力。
+- EnableLogsHandler：是Kubernetes中某些组件（如kubelet）用于控制是否启用日志处理功能。它的主要作用是开启或关闭组件对系统日志的处理和暴露能力。当EnableLogsHandler设置为true时，组件会启用日志处理相关的 HTTP处理器，允许通过API访问节点或组件的日志数据。这在调试和运维时非常有用，比如通过kubelet的日志查询接口获取节点上服务的日志。当设置为false时，则关闭该功能，日志访问接口不可用，增强安全性但减少了调试便利性。
+- EventTTL：是指事件在Kubernates API服务器中保存的最长时间，超过这个时间的事件会被自动清理删除，避免事件数据无限增长占用ETCD存储空间。Kubernetes中各组件（如kubelet）会在资源状态变化时产生日志事件，这些事件被发送到API Server，API Server将事件存储在etcd中。为了防止etcd存储过大，事件会根据EventTTL设置的时间自动过期删除。EventTTL的默认值通常是1小时，即事件只会保留最近1小时内的记录。该参数可以通过 kube-apiserver的启动参数--event-ttl来配置，例如设置为72小时或其他时间长度，以满足不同监控需求。API Server会在事件最后一次发生后，根据EventTTL时间自动删除过期事件，避免频繁占用资源。Kubernetes的EventTTL是一个关键参数，用于控制事件在集群中保存的时间长度，默认1小时，可根据需求调整，以保证事件数据既能满足监控需求，又不会对存储系统造成过大压力。
+- MaxConnectionBytesPerSec：是kube-apiserver的一个参数，用于限制每个连接每秒钟允许传输的最大字节数。它主要用于控制API Server的网络带宽使用，防止单个连接占用过多资源，保障集群的稳定性和性能。
+- PeerCAFile：通常指的是用于集群内部组件之间相互认证的CA（证书颁发机构）证书文件，它是TLS双向认证（mTLS）中的一部分，用于验证对端（peer）的身份。
+- PeerAdvertiseAddress：是kube-apiserver的IP地址，将其它peer apiserver请求路由到这个apiserver。当某个peer由于版本差异无法处理请求时，会发生这种路由。
+- EnableAggregatorRouting：是用来开启API聚合层中的路由功能。EnableAggregatorRouting允许KubernatesAPI聚合层中的聚合器，将请求路由到后端的扩展API服务器。当聚合器接收到请求时，如果当前的API服务器无法直接处理，就会利用该路由功能将请求转发到其它peer API服务器处理。在启用了多个扩展API服务器的集群中，开启该参数可以实现请求的智能路由和负载均衡，保证请求能够被正确处理，提升API扩展的可靠性和灵活性。该参数使得聚合器能够根据APIServices资源定义，将请求转发到对应的Service，Service类型决定了请求的转发方式。聚合器内部包含多个控制器来维护API服务的注册、状态和路由。EnableAggregatorRouting是Kubernetes API聚合层中用于启用请求路由转发功能的关键参数，提升了扩展API的可用性和扩展性。
+- AggregatorRejectForwardingRedirects 参数是聚合层（Aggregator）相关的一个配置选项，其作用主要是控制聚合层在处理请求转发时是否拒绝重定向（redirect）响应。当聚合层将请求转发给后端扩展API服务器时，后端服务器可能会返回HTTP重定向响应（如3xx状态码），这时如果启用了AggregatorRejectForwardingRedirects，聚合层会拒绝这些重定向响应，而不是继续跟随重定向。
+- 用于指定一个包含私钥的文件路径，这个私钥用于签署ServiceAccount令牌。当Kubernetes为ServiceAccount生成JWT令牌时，需要使用私钥对令牌进行签名，保证令牌的真实性和完整性。ServiceAccountSigningKeyFile指定的就是这个私钥文件。该文件通常是PEM格式的私钥文件，可以是RSA或ECDSA类型。kube-apiserver可以通过多次指定该参数来支持多个签名密钥，便于密钥轮换和兼容旧令牌。
+- 用于指定服务账号令牌（ServiceAccount Token）的签发者（Issuer）标识符，它是一个URL，代表该令牌的发行来源。令牌中包含 iss（issuer）字段，值就是 --service-account-issuer 指定的地址，客户端和认证系统通过它验证令牌的来源是否合法。启用令牌请求投影（Token Request Projection）功能时，必须指定此参数，确保生成的令牌符合OIDC标准。
+- ServiceAccountTokenMaxExpiration：用于设置ServiceAccount Token的最大有效期。ServiceAccountTokenMaxExpiration是Kubernetes用于控制ServiceAccount Token最长生命周期的参数，配合TokenRequest API和BoundServiceAccountTokenVolume机制，实现了Token的自动刷新和过期管理，从而增强集群安全性。默认最大有效期通常为1年，kubelet负责自动刷新，确保Pod访问API时Token有效。用户应注意客户端版本兼容性，及时升级以避免Token过期带来的访问中断风险。
+- ShowHiddenMetricsForVersion：是一个命令行参数，用于控制显示在特定版本中已被弃用但默认隐藏的指标(metrics)。它的主要作用是为集群管理员提供一个“逃生门”，以便在升级过程中如果仍依赖于某些已弃用的指标，可以临时重新启用这些指标，避免因指标突然消失导致监控和告警中断。
+- SystemNamespaces：是指Kubernates集群启动时自动创建并由系统使用的特殊命名空间不同，主要用于保证Kubernates系统功能的正常运行和集群管理。常见的系统命名空间包括：default（默认命名空间，用户如果不指定命名空间，资源会默认创建在这里。）、kube-system（用于存放Kubernetes系统组件的命名空间，如调度器（kube-scheduler）、控制器管理器（kube-controller-manager）、核心 DNS 服务等。）、kube-public（公开命名空间，所有用户（包括未认证用户）都可以读取，通常用于存放集群级别的公共信息。）、kube-node-lease（用于节点租约对象，帮助控制面检测节点是否存活，提升节点状态更新的效率。）。系统命名空间的特点：由Kubernetes自动创建和管理，不建议用户随意修改或删除。保留以kube-前缀开头的命名空间名称，避免用户创建同名命名空间以防冲突。主要用于集群内部管理和系统组件运行，保证Kubernetes集群的稳定性与安全性。与用户自定义命名空间相互隔离，用户可以根据项目或团队需求创建自己的命名空间进行资源隔离和权限管理。系统命名空间是Kubernetes集群运行的基础环境，承载着核心系统组件和集群管理功能，确保集群的正常运行和安全隔离。
+- ServiceAccountSigningEndpoint：是kube-apiserver的一个参数，用于指定一个外部JWT签名程序监听的套接字路径。它的作用是让API Server在签发ServiceAccount令牌时，调用这个外部服务进行JWT签名，而不是使用本地的私钥文件来签名。
 
